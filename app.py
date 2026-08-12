@@ -644,6 +644,10 @@ def get_fundamentals(ticker_obj):
     de     = safe("debtToEquity")
     divy   = safe("dividendYield",           scale=100) # → %
     beta   = safe("beta")
+    mktcap = safe("marketCap", dec=0)
+    name   = info.get("longName") or info.get("shortName")
+    sector = info.get("sector")
+    industry = info.get("industry")
 
     # Buffett value score (0–5)
     score, reasons = 0, []
@@ -670,6 +674,10 @@ def get_fundamentals(ticker_obj):
         "debt_equity":   de,
         "div_yield":     divy,
         "beta":          beta,
+        "market_cap":    mktcap,
+        "name":          name,
+        "sector":        sector,
+        "industry":      industry,
         "value_score":   min(score, 5),
         "value_reasons": reasons[:3],
     }

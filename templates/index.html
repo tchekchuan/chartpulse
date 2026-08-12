@@ -953,19 +953,35 @@ function renderFundamentals(funds) {
   badge.textContent = '★'.repeat(sc) + '☆'.repeat(5-sc);
   badge.style.color  = sc >= 4 ? '#3fb950' : sc >= 2 ? '#e3b341' : '#f85149';
 
+  const fmtCap = v => {
+    if (v >= 1e12) return '$' + (v/1e12).toFixed(2) + 'T';
+    if (v >= 1e9)  return '$' + (v/1e9).toFixed(2) + 'B';
+    if (v >= 1e6)  return '$' + (v/1e6).toFixed(2) + 'M';
+    return '$' + v.toLocaleString();
+  };
+
+  let html = '';
+  if (funds.name) {
+    html += `<div style="font-size:.8rem;color:#c9d1d9;padding:2px 0 6px;font-weight:600">${funds.name}</div>`;
+  }
+  if (funds.sector || funds.industry) {
+    html += `<div style="font-size:.72rem;color:#8b949e;padding:0 0 8px">${[funds.sector, funds.industry].filter(Boolean).join(' · ')}</div>`;
+  }
+
   const metrics = [
+    { k:'market_cap',    lbl:'Market Cap',  fmt:fmtCap,                good:null,           bad:null    },
     { k:'pe',            lbl:'P/E Ratio',   fmt:v=>v.toFixed(1),       good:v=>v>0&&v<25,   bad:v=>v>35 },
     { k:'forward_pe',    lbl:'Fwd P/E',     fmt:v=>v.toFixed(1),       good:v=>v>0&&v<20,   bad:v=>v>30 },
     { k:'pb',            lbl:'P/B Ratio',   fmt:v=>v.toFixed(2),       good:v=>v>0&&v<3,    bad:v=>v>5  },
     { k:'roe',           lbl:'ROE',         fmt:v=>v.toFixed(1)+'%',   good:v=>v>15,        bad:v=>v<5  },
     { k:'eps',           lbl:'EPS (TTM)',   fmt:v=>v.toFixed(2),       good:v=>v>0,         bad:v=>v<0  },
     { k:'eps_growth',    lbl:'EPS Growth',  fmt:v=>v.toFixed(1)+'%',   good:v=>v>10,        bad:v=>v<0  },
+    { k:'rev_growth',    lbl:'Rev Growth',  fmt:v=>v.toFixed(1)+'%',   good:v=>v>10,        bad:v=>v<0  },
     { k:'profit_margin', lbl:'Net Margin',  fmt:v=>v.toFixed(1)+'%',   good:v=>v>10,        bad:v=>v<0  },
     { k:'debt_equity',   lbl:'Debt/Equity', fmt:v=>v.toFixed(1),       good:v=>v<50,        bad:v=>v>150},
     { k:'div_yield',     lbl:'Div Yield',   fmt:v=>v.toFixed(2)+'%',   good:v=>v>1,         bad:null    },
     { k:'beta',          lbl:'Beta',        fmt:v=>v.toFixed(2),       good:v=>v>0.5&&v<1.5,bad:v=>v>2.5},
   ];
-  let html = '';
   metrics.forEach(m => {
     const v = funds[m.k];
     if (v === null || v === undefined) return;
