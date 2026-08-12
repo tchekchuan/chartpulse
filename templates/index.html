@@ -4,6 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>getChartPulse — Stock S/R Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='14' fill='%230F1A1C'/%3E%3Cpath d='M4 40 L20 40 L26 10 L34 56 L42 40 L60 40' fill='none' stroke='%23FF6B4A' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='60' cy='40' r='4' fill='%23FF6B4A'/%3E%3C/svg%3E"/>
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
@@ -11,7 +12,10 @@
 
     /* ── Header ── */
     header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-    header h1{font-size:1rem;font-weight:700;color:#58a6ff;white-space:nowrap}
+    header h1{font-size:1rem;font-weight:700;color:#58a6ff;white-space:nowrap;display:flex;align-items:center;gap:8px}
+    header h1 svg{width:22px;height:22px;flex:none}
+    header h1 .get{color:#8CA6A3;font-weight:600}
+    header h1 .pulse{color:#FF6B4A}
 
     .search-wrap{position:relative;flex:1;max-width:300px}
     #symbolInput{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.93rem;outline:none;text-transform:uppercase}
@@ -177,7 +181,20 @@
 <body>
 
 <header>
-  <h1>📈 getChartPulse</h1>
+  <h1>
+    <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="60" height="60" rx="14" fill="#0F1A1C"/>
+      <rect x="14" y="38" width="6" height="8" rx="1" fill="#24413E"/>
+      <line x1="17" y1="34" x2="17" y2="50" stroke="#3B5C58" stroke-width="1.5"/>
+      <rect x="26" y="30" width="6" height="16" rx="1" fill="#24413E"/>
+      <line x1="29" y1="24" x2="29" y2="50" stroke="#3B5C58" stroke-width="1.5"/>
+      <rect x="38" y="16" width="6" height="30" rx="1" fill="#2C4E4A"/>
+      <line x1="41" y1="10" x2="41" y2="52" stroke="#3B5C58" stroke-width="1.5"/>
+      <path d="M4 48 L34 48 L38 46 L41 4 L44 46 L48 54 L52 48 L60 48" fill="none" stroke="#FF6B4A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="60" cy="48" r="3" fill="#FF6B4A"/>
+    </svg>
+    <span class="get">get</span>ChartPulse
+  </h1>
   <div class="search-wrap">
     <input id="symbolInput" type="text" placeholder="Symbol (e.g. AAPL)" value="AAPL" autocomplete="off"/>
     <div id="suggestions"></div>
