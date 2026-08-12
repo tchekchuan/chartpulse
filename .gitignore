@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 cloudflared.exe
 .env
+alert_state.json

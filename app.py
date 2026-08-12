@@ -1582,5 +1582,21 @@ def search_ticker():
         return jsonify([])
 
 
+@app.route("/api/alert-check")
+def alert_check():
+    """Manual trigger for testing the Telegram alert job — protected since
+    the site is fully public and this pushes a message to a real phone."""
+    key = request.args.get("key", "")
+    expected = os.environ.get("ALERT_TEST_KEY")
+    if not expected or key != expected:
+        return jsonify({"error": "forbidden"}), 403
+    alerts.check_and_alert()
+    return jsonify({"ok": True})
+
+
+import alerts  # noqa: E402  (imports analyze_symbol from this module)
+alerts.start_scheduler()
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
