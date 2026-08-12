@@ -1,6 +1,7 @@
 from flask import Flask, render_template, jsonify, request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import time
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -616,15 +617,33 @@ def candlestick_patterns(df, atr_val):
 #  10. FUNDAMENTALS  (Warren Buffett value-investing metrics)
 # ══════════════════════════════════════════════════════════════════════════════
 
+_FUNDAMENTALS_CACHE = {}     # symbol -> (expires_at, data)
+_FUNDAMENTALS_TTL_OK   = 6 * 3600   # successful fetch: fundamentals barely move intraday
+_FUNDAMENTALS_TTL_FAIL = 10 * 60    # failed fetch (e.g. rate limited): retry sooner, but not immediately
+
+
 def get_fundamentals(ticker_obj):
     """
     Extracts key Buffett-style fundamental metrics from yfinance.
     Scores the stock 0–5 on value quality (ROE, P/E, debt, EPS growth).
+
+    Cached per symbol — yfinance's .info call hits a separate, far more
+    rate-limited Yahoo endpoint than price/candle history, so refetching
+    it on every page load/refresh was triggering YFRateLimitError.
     """
+    sym = getattr(ticker_obj, "ticker", None)
+    now = time.time()
+    if sym and sym in _FUNDAMENTALS_CACHE:
+        expires_at, cached = _FUNDAMENTALS_CACHE[sym]
+        if now < expires_at:
+            return cached
+
     try:
         info = ticker_obj.info
     except Exception as e:
-        app.logger.warning(f"get_fundamentals: ticker.info failed for {getattr(ticker_obj,'ticker','?')}: {type(e).__name__}: {e}")
+        app.logger.warning(f"get_fundamentals: ticker.info failed for {sym}: {type(e).__name__}: {e}")
+        if sym:
+            _FUNDAMENTALS_CACHE[sym] = (now + _FUNDAMENTALS_TTL_FAIL, {})
         return {}
 
     def safe(key, scale=1, dec=2):
@@ -665,7 +684,7 @@ def get_fundamentals(ticker_obj):
     if margin and margin > 10:
         score += 1; reasons.append(f"Margin {margin:.0f}%")
 
-    return {
+    result = {
         "pe":            pe,
         "forward_pe":    fwd_pe,
         "pb":            pb,
@@ -684,6 +703,9 @@ def get_fundamentals(ticker_obj):
         "value_score":   min(score, 5),
         "value_reasons": reasons[:3],
     }
+    if sym:
+        _FUNDAMENTALS_CACHE[sym] = (now + _FUNDAMENTALS_TTL_OK, result)
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1040,13 +1062,13 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
     best_buy   = max(buy_zones,  key=lambda z: z.get("stars", 0), default=None)
     best_sell  = max(sell_zones, key=lambda z: z.get("stars", 0), default=None)
 
-    # News adjusts the star quality of signals too
-    if best_buy and sent_sc >= 0.15:
-        best_buy["stars"] = min(5, best_buy.get("stars", 1) + 1)
-        best_buy["factors"] = (best_buy.get("factors", []) or []) + [f"News boost: {sentiment['label']}"]
-    if best_sell and sent_sc <= -0.15:
-        best_sell["stars"] = min(5, best_sell.get("stars", 1) + 1)
-        best_sell["factors"] = (best_sell.get("factors", []) or []) + [f"News boost: {sentiment['label']}"]
+    # News tilts the analyst's own verdict below, but must NOT mutate the zone
+    # objects in `signals` — those are the same objects rendered in the Trade
+    # Signals panel (and reused by the screener/portfolio-alert jobs), and a
+    # silent one-off star bump there made otherwise-equal zones look
+    # inconsistently rated for no visible reason.
+    best_buy_stars  = min(5, best_buy.get("stars", 1)  + 1) if best_buy  and sent_sc >=  0.15 else (best_buy.get("stars", 1)  if best_buy  else 0)
+    best_sell_stars = min(5, best_sell.get("stars", 1) + 1) if best_sell and sent_sc <= -0.15 else (best_sell.get("stars", 1) if best_sell else 0)
 
     # ── Rating thresholds ─────────────────────────────────────────────────────
     if   score >= 7:  rating, color = "STRONG BUY",  "#22c55e"
@@ -1080,7 +1102,7 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
     # Best buy zone
     if best_buy:
         verdict_parts.append(
-            f"Best buy zone is {best_buy['price']:.2f} ({best_buy['confluence']}× confluence, {best_buy.get('stars',1)}★): "
+            f"Best buy zone is {best_buy['price']:.2f} ({best_buy['confluence']}× confluence, {best_buy_stars}★): "
             f"stop {best_buy.get('stop',0):.2f} · target {best_buy.get('target',0):.2f} · R:R {best_buy.get('rr',0):.1f}:1."
         )
 
@@ -1334,7 +1356,7 @@ def get_stock():
             "patterns":        patterns,
             "signals":         signals,
             "fundamentals":    fundamentals,
-            "news":            news,
+            "news":            sentiment.get("articles", news),
             "sentiment":       sentiment,
             "context":         context,
             "analyst":         analyst,
