@@ -1,10 +1,12 @@
 from flask import Flask, render_template, jsonify, request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
 app = Flask(__name__)
+app.logger.setLevel(logging.INFO)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  UTILITY
@@ -621,7 +623,8 @@ def get_fundamentals(ticker_obj):
     """
     try:
         info = ticker_obj.info
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"get_fundamentals: ticker.info failed for {getattr(ticker_obj,'ticker','?')}: {type(e).__name__}: {e}")
         return {}
 
     def safe(key, scale=1, dec=2):
