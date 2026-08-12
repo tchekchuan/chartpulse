@@ -1338,6 +1338,7 @@ def get_stock():
 
         df = df.reset_index()
         df.columns = [c.replace(" ", "_") for c in df.columns]
+        df = df.dropna(subset=["Open", "High", "Low", "Close"]).reset_index(drop=True)
 
         if len(df) < 15:
             return jsonify({"error": "Too few candles for reliable analysis — choose a longer period."}), 400
@@ -1455,11 +1456,12 @@ def analyze_symbol(sym, period="3mo", interval="1d"):
         if df is None or df.empty:
             return {"symbol": sym, "error": "Yahoo Finance returned no data — check symbol"}
 
-        if len(df) < 15:
-            return {"symbol": sym, "error": f"Only {len(df)} bars — use a longer period"}
-
         df = df.reset_index()
         df.columns = [c.replace(" ", "_") for c in df.columns]
+        df = df.dropna(subset=["Open", "High", "Low", "Close"]).reset_index(drop=True)
+
+        if len(df) < 15:
+            return {"symbol": sym, "error": f"Only {len(df)} bars — use a longer period"}
 
         # ── Technical analysis ─────────────────────────────────────────────
         atr_val  = calc_atr(df)
