@@ -4,6 +4,14 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>getChartPulse — Stock S/R Monitor</title>
+  <meta name="description" content="Live support/resistance, trend-stage, and pattern analysis for any stock ticker — free, no signup."/>
+  <meta property="og:title" content="getChartPulse — Stock S/R Monitor"/>
+  <meta property="og:description" content="Live support/resistance, trend-stage, and pattern analysis for any stock ticker — free, no signup."/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="https://getchartpulse.com"/>
+  <meta name="twitter:card" content="summary"/>
+  <meta name="twitter:title" content="getChartPulse — Stock S/R Monitor"/>
+  <meta name="twitter:description" content="Live support/resistance, trend-stage, and pattern analysis for any stock ticker — free, no signup."/>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='14' fill='%230F1A1C'/%3E%3Cpath d='M4 40 L20 40 L26 10 L34 56 L42 40 L60 40' fill='none' stroke='%23FF6B4A' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='60' cy='40' r='4' fill='%23FF6B4A'/%3E%3C/svg%3E"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -20,6 +28,9 @@
     header h1 .get{color:#7c928f;font-weight:500;font-size:.72rem;margin-right:1px}
     header h1 .chart{font-family:'Fraunces',serif;font-weight:750;color:#f2f6f5}
     header h1 .pulse{font-family:'Fraunces',serif;font-weight:750;color:#ff6b4a}
+
+    /* ── Disclaimer footer ── */
+    footer.disclaimer{flex:none;background:#0d1117;border-top:1px solid #30363d;padding:4px 16px;font-size:.68rem;color:#586069;text-align:center}
 
     .search-wrap{position:relative;flex:1;max-width:300px}
     #symbolInput{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.93rem;outline:none;text-transform:uppercase}
@@ -405,6 +416,10 @@
     </div>
   </div>
 </div>
+
+<footer class="disclaimer">
+  Not financial advice — for informational and educational purposes only. Data delayed, sourced from Yahoo Finance. Trade at your own risk.
+</footer>
 
 <script>
 // ══════════════════════════════════════════════════════════════════════════════
