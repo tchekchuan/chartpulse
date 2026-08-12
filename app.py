@@ -1,35 +1,10 @@
-from flask import Flask, render_template, jsonify, request, Response
+from flask import Flask, render_template, jsonify, request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import os
-import secrets
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
 app = Flask(__name__)
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ACCESS CONTROL — required once this app is reachable beyond localhost.
-#  Set STOCK_MONITOR_PASSWORD as an environment variable before launch.
-#  If it's not set, the app refuses to bind to anything but localhost, so an
-#  unauthenticated instance can never accidentally end up exposed online.
-# ══════════════════════════════════════════════════════════════════════════════
-
-STOCK_MONITOR_PASSWORD = os.environ.get("STOCK_MONITOR_PASSWORD")
-
-
-def check_auth(password):
-    return STOCK_MONITOR_PASSWORD and secrets.compare_digest(password, STOCK_MONITOR_PASSWORD)
-
-
-@app.before_request
-def _require_login():
-    auth = request.authorization
-    if not auth or not check_auth(auth.password):
-        return Response(
-            "Login required", 401,
-            {"WWW-Authenticate": 'Basic realm="Stock Monitor"'}
-        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  UTILITY
@@ -1506,12 +1481,4 @@ def search_ticker():
 
 
 if __name__ == "__main__":
-    if STOCK_MONITOR_PASSWORD:
-        # Password is set -- safe to listen on all interfaces (needed for
-        # Cloudflare Tunnel / any external access).
-        app.run(host="0.0.0.0", port=5000)
-    else:
-        print("WARNING: STOCK_MONITOR_PASSWORD is not set.")
-        print("Running on localhost ONLY until a password is configured --")
-        print("this app will refuse external access with no password set.")
-        app.run(host="127.0.0.1", port=5000)
+    app.run(host="0.0.0.0", port=5000)
