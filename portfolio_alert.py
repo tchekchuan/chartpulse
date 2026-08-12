@@ -147,7 +147,7 @@ def main():
 
     if changes:
         today = datetime.now().strftime("%Y-%m-%d %H:%M")
-        title = "ChartPulse Portfolio Alert"
+        title = "getChartPulse Portfolio Alert"
         message = f"{today}\n\n" + "\n\n".join(changes)
         send_notification(title, message)
         print(f"\n  Sent alert for {len(changes)} holding(s) with an actionable change.")
