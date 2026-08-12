@@ -11,15 +11,21 @@
 
 import json
 import os
+import smtplib
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from email.mime.text import MIMEText
 from pathlib import Path
 
 import requests
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
+
+GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
+ALERT_EMAIL_TO     = os.environ.get("ALERT_EMAIL_TO")
 
 STATE_FILE = Path(__file__).parent / "alert_state.json"
 SGT = timezone(timedelta(hours=8))
@@ -70,6 +76,25 @@ def send_telegram(text):
         return False
 
 
+def send_email(subject, body):
+    if not (GMAIL_ADDRESS and GMAIL_APP_PASSWORD and ALERT_EMAIL_TO):
+        print("alerts: GMAIL_ADDRESS/GMAIL_APP_PASSWORD/ALERT_EMAIL_TO not set, skipping email")
+        return False
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = GMAIL_ADDRESS
+        msg["To"] = ALERT_EMAIL_TO
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
+            server.starttls()
+            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_ADDRESS, [ALERT_EMAIL_TO], msg.as_string())
+        return True
+    except Exception as e:
+        print(f"alerts: Email send failed: {e}")
+        return False
+
+
 def check_and_alert():
     """Runs one full check cycle. Safe to call manually for testing."""
     from app import analyze_symbol   # deferred: avoids import-order issues with app.py
@@ -114,6 +139,10 @@ def check_and_alert():
         now = datetime.now(SGT).strftime("%Y-%m-%d %H:%M SGT")
         msg = f"📈 *getChartPulse Alert*\n{now}\n\n" + "\n\n".join(lines)
         send_telegram(msg)
+        plain = f"getChartPulse Alert — {now}\n\n" + "\n\n".join(
+            l.replace("*", "") for l in lines
+        )
+        send_email(f"getChartPulse Alert — {len(lines)} update(s)", plain)
         print(f"alerts: sent {len(lines)} alert(s)")
     else:
         print("alerts: no actionable changes this cycle")
