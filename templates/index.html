@@ -1088,13 +1088,15 @@ function updatePriceBar(meta, stage) {
   el.className = cls;
   el.textContent = `${sign}${chg.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
 
+  const s = document.getElementById('pStage');
   if (stage && stage.label !== 'N/A — need more data') {
-    const s = document.getElementById('pStage');
     s.textContent    = stage.label;
     s.style.color    = stage.color;
     s.style.borderColor = stage.color;
     s.style.background  = stage.color + '22';
     s.style.display  = 'inline';
+  } else {
+    s.style.display  = 'none';
   }
 }
 
