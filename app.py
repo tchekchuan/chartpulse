@@ -1,7 +1,9 @@
 from flask import Flask, render_template, jsonify, request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import os
 import time
+import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -622,14 +624,61 @@ _FUNDAMENTALS_TTL_OK   = 6 * 3600   # successful fetch: fundamentals barely move
 _FUNDAMENTALS_TTL_FAIL = 10 * 60    # failed fetch (e.g. rate limited): retry sooner, but not immediately
 
 
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
+
+
+def _fetch_finnhub_fundamentals(sym):
+    """
+    Fetches fundamentals from Finnhub instead of yfinance's ticker.info —
+    Yahoo rate-limits/blocks that specific endpoint from cloud hosting IPs
+    (confirmed via production logs: YFRateLimitError on every call), while
+    Finnhub's free tier (60 req/min) has no such issue for this app's scale.
+    """
+    profile = requests.get(
+        "https://finnhub.io/api/v1/stock/profile2",
+        params={"symbol": sym, "token": FINNHUB_API_KEY}, timeout=8,
+    ).json()
+    metric = requests.get(
+        "https://finnhub.io/api/v1/stock/metric",
+        params={"symbol": sym, "metric": "all", "token": FINNHUB_API_KEY}, timeout=8,
+    ).json().get("metric", {})
+
+    def safe(d, key, scale=1, dec=2):
+        v = d.get(key)
+        if v is None:
+            return None
+        try:
+            return round(float(v) * scale, dec)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "pe":       safe(metric, "peTTM"),
+        "forward_pe": safe(metric, "forwardPE"),
+        "pb":       safe(metric, "pbQuarterly"),
+        "roe":      safe(metric, "roeTTM"),                        # already %
+        "eps":      safe(metric, "epsTTM"),
+        "eps_growth": safe(metric, "epsGrowthTTMYoy"),              # already %
+        "rev_growth": safe(metric, "revenueGrowthTTMYoy"),          # already %
+        "profit_margin": safe(metric, "netProfitMarginTTM"),        # already %
+        "debt_equity": safe(metric, "totalDebt/totalEquityQuarterly", scale=100),
+        "div_yield": safe(metric, "currentDividendYieldTTM"),       # already %
+        "beta":     safe(metric, "beta"),
+        "market_cap": safe(profile, "marketCapitalization", scale=1_000_000, dec=0),
+        "name":     profile.get("name"),
+        "sector":   profile.get("finnhubIndustry"),
+        "industry": None,
+    }
+
+
 def get_fundamentals(ticker_obj):
     """
-    Extracts key Buffett-style fundamental metrics from yfinance.
+    Extracts key Buffett-style fundamental metrics.
     Scores the stock 0–5 on value quality (ROE, P/E, debt, EPS growth).
 
-    Cached per symbol — yfinance's .info call hits a separate, far more
-    rate-limited Yahoo endpoint than price/candle history, so refetching
-    it on every page load/refresh was triggering YFRateLimitError.
+    Cached per symbol — fundamentals barely move intraday, and yfinance's
+    ticker.info call (used as a fallback below) hits a far more
+    rate-limited Yahoo endpoint than price/candle history.
     """
     sym = getattr(ticker_obj, "ticker", None)
     now = time.time()
@@ -638,38 +687,56 @@ def get_fundamentals(ticker_obj):
         if now < expires_at:
             return cached
 
-    try:
-        info = ticker_obj.info
-    except Exception as e:
-        app.logger.warning(f"get_fundamentals: ticker.info failed for {sym}: {type(e).__name__}: {e}")
-        if sym:
-            _FUNDAMENTALS_CACHE[sym] = (now + _FUNDAMENTALS_TTL_FAIL, {})
-        return {}
-
-    def safe(key, scale=1, dec=2):
-        v = info.get(key)
-        if v is None or v == "N/A":
-            return None
+    info = None
+    if FINNHUB_API_KEY and sym:
         try:
-            return round(float(v) * scale, dec)
-        except (TypeError, ValueError):
-            return None
+            fh = _fetch_finnhub_fundamentals(sym)
+            if fh.get("pe") or fh.get("market_cap") or fh.get("name"):
+                info = fh
+        except Exception as e:
+            app.logger.warning(f"get_fundamentals: Finnhub failed for {sym}: {type(e).__name__}: {e}")
 
-    pe     = safe("trailingPE")
-    fwd_pe = safe("forwardPE")
-    pb     = safe("priceToBook")
-    roe    = safe("returnOnEquity",        scale=100)   # → %
-    eps    = safe("trailingEps")
-    eps_g  = safe("earningsQuarterlyGrowth", scale=100) # → %
-    rev_g  = safe("revenueGrowth",           scale=100) # → %
-    margin = safe("profitMargins",           scale=100) # → %
-    de     = safe("debtToEquity")
-    divy   = safe("dividendYield",           scale=100) # → %
-    beta   = safe("beta")
-    mktcap = safe("marketCap", dec=0)
-    name   = info.get("longName") or info.get("shortName")
-    sector = info.get("sector")
-    industry = info.get("industry")
+    if info is None:
+        try:
+            yf_info = ticker_obj.info
+        except Exception as e:
+            app.logger.warning(f"get_fundamentals: ticker.info failed for {sym}: {type(e).__name__}: {e}")
+            if sym:
+                _FUNDAMENTALS_CACHE[sym] = (now + _FUNDAMENTALS_TTL_FAIL, {})
+            return {}
+
+        def safe(key, scale=1, dec=2):
+            v = yf_info.get(key)
+            if v is None or v == "N/A":
+                return None
+            try:
+                return round(float(v) * scale, dec)
+            except (TypeError, ValueError):
+                return None
+
+        info = {
+            "pe":       safe("trailingPE"),
+            "forward_pe": safe("forwardPE"),
+            "pb":       safe("priceToBook"),
+            "roe":      safe("returnOnEquity",        scale=100),
+            "eps":      safe("trailingEps"),
+            "eps_growth": safe("earningsQuarterlyGrowth", scale=100),
+            "rev_growth": safe("revenueGrowth",           scale=100),
+            "profit_margin": safe("profitMargins",        scale=100),
+            "debt_equity": safe("debtToEquity"),
+            "div_yield": safe("dividendYield",            scale=100),
+            "beta":     safe("beta"),
+            "market_cap": safe("marketCap", dec=0),
+            "name":     yf_info.get("longName") or yf_info.get("shortName"),
+            "sector":   yf_info.get("sector"),
+            "industry": yf_info.get("industry"),
+        }
+
+    pe, fwd_pe, pb, roe, eps, eps_g, rev_g, margin, de, divy, beta, mktcap, name, sector, industry = (
+        info["pe"], info["forward_pe"], info["pb"], info["roe"], info["eps"],
+        info["eps_growth"], info["rev_growth"], info["profit_margin"], info["debt_equity"],
+        info["div_yield"], info["beta"], info["market_cap"], info["name"], info["sector"], info["industry"],
+    )
 
     # Buffett value score (0–5)
     score, reasons = 0, []
