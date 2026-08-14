@@ -1508,6 +1508,7 @@ def analyze_symbol(sym, period="3mo", interval="1d"):
 
         return {
             "symbol":      sym,
+            "name":        fundamentals.get("name"),
             "price":       price,
             "change":      chg_pct,
             "currency":    currency,

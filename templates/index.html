@@ -190,6 +190,7 @@
     .screen-row{cursor:pointer;transition:.1s}
     .screen-row:hover td{background:#1f2937}
     .screen-sym{font-weight:700;color:#58a6ff;font-size:.9rem}
+    .screen-name{font-size:.68rem;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
     .screen-rating{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
     #screenerBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
     #screenerBtn:hover{border-color:#58a6ff;color:#58a6ff}
@@ -1335,7 +1336,7 @@ function renderScreenerTable(data) {
     const rrColor   = (d.rr||0) >= 2 ? '#3fb950' : '#e3b341';
     const stageIcon = {2:'↑',4:'↓',3:'⚠',1:'—'}[d.stage] || '—';
     html += `<tr class="screen-row" data-sym="${d.symbol}" title="${(d.verdict||'').replace(/"/g,"'")}">
-      <td class="screen-sym">${d.symbol}</td>
+      <td><div class="screen-sym">${d.symbol}</div>${d.name ? `<div class="screen-name">${d.name}</div>` : ''}</td>
       <td><span class="screen-rating" style="color:${d.color};border-color:${d.color};background:${d.color}22">${d.rating}</span></td>
       <td style="font-family:monospace;font-size:.83rem">${d.price.toFixed(2)}</td>
       <td style="color:${chgColor};font-size:.83rem">${d.change>0?'+':''}${d.change.toFixed(2)}%</td>
