@@ -1,50 +1,43 @@
 # ============================================================
 # File: mailer.py
 # Date: 2026-08-15
-# Task: Shared Gmail SMTP sender for alerts.py and subscribers.py.
+# Task: Shared email sender for alerts.py and subscribers.py.
 #
-# Render's containers have no IPv6 route, but smtplib's default
-# connection logic tries whatever getaddrinfo() returns first --
-# smtp.gmail.com has an AAAA (IPv6) record, so it was failing with
-# "[Errno 101] Network is unreachable" on every send in production
-# (only ever verified locally, where IPv6 routing exists). Forcing
-# an IPv4-only resolution before connecting fixes it.
+# Originally used Gmail SMTP. Render blocks outbound SMTP ports
+# entirely (confirmed via production logs: IPv6 "Network is
+# unreachable", then even after forcing IPv4, a silent connection
+# TimeoutError -- consistent with a firewall DROP rule, common on
+# free-tier hosting to prevent spam abuse). Switched to Resend's
+# HTTP API instead -- port 443 is never blocked, since that would
+# break the platform's own core purpose of serving web traffic.
 # ============================================================
 
 import os
-import smtplib
-import socket
-from email.mime.text import MIMEText
+import requests
 
-GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
-
-
-def _connect_ipv4(host, port, timeout=10):
-    addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-    ipv4_addr = addr_info[0][4][0]
-    server = smtplib.SMTP(timeout=timeout)
-    server.connect(ipv4_addr, port)
-    server._host = host  # starttls() validates the TLS cert against this, not the IP
-    return server
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+FROM_ADDRESS    = "getChartPulse <onboarding@resend.dev>"  # Resend's shared test sender -- works without a verified domain
 
 
 def send_email(to_addr, subject, body):
-    if not (GMAIL_ADDRESS and GMAIL_APP_PASSWORD):
-        print("mailer: GMAIL_ADDRESS/GMAIL_APP_PASSWORD not set, skipping email")
+    if not RESEND_API_KEY:
+        print("mailer: RESEND_API_KEY not set, skipping email")
         return False
     try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = GMAIL_ADDRESS
-        msg["To"] = to_addr
-        server = _connect_ipv4("smtp.gmail.com", 587, timeout=10)
-        try:
-            server.starttls()
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, [to_addr], msg.as_string())
-        finally:
-            server.quit()
+        r = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            json={
+                "from": FROM_ADDRESS,
+                "to": [to_addr],
+                "subject": subject,
+                "text": body,
+            },
+            timeout=10,
+        )
+        if r.status_code >= 300:
+            print(f"mailer: email to {to_addr} failed: {r.status_code} {r.text[:200]}")
+            return False
         return True
     except Exception as e:
         print(f"mailer: email to {to_addr} failed: {type(e).__name__}: {e}")
