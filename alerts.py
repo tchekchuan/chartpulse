@@ -101,7 +101,8 @@ def check_and_alert():
 
     prev_state = _load_state()
     new_state  = {}
-    lines      = []
+    lines            = []   # everything -- goes to Shawn only (Telegram + his email)
+    strong_buy_lines = []   # STRONG BUY only -- also goes to public subscribers
 
     all_symbols = list(dict.fromkeys(PORTFOLIO + WATCHLIST))  # dedup, keep order
     for sym in all_symbols:
@@ -126,12 +127,15 @@ def check_and_alert():
         if is_new_strong_buy or is_held_change:
             tag = "⭐ STRONG BUY" if rating == "STRONG BUY" else f"{action} zone"
             held_tag = " (held)" if held else ""
-            lines.append(
+            line = (
                 f"*{sym}*{held_tag}: {tag} — {rating}\n"
                 f"  Price {r['price']:.2f} {r['currency']} ({r['change']:+.2f}%)  "
                 f"RSI {r['rsi']:.0f}  Stage {r['stage']}\n"
                 f"  {r['reason']}"
             )
+            lines.append(line)
+            if is_new_strong_buy:
+                strong_buy_lines.append(line)
 
     _save_state(new_state)
 
@@ -146,6 +150,18 @@ def check_and_alert():
         print(f"alerts: sent {len(lines)} alert(s)")
     else:
         print("alerts: no actionable changes this cycle")
+
+    if strong_buy_lines:
+        try:
+            import subscribers
+            now = datetime.now(SGT).strftime("%Y-%m-%d %H:%M SGT")
+            public_plain = f"getChartPulse — {now}\n\n" + "\n\n".join(
+                l.replace("*", "") for l in strong_buy_lines
+            )
+            sent = subscribers.send_strong_buy_alert(public_plain)
+            print(f"alerts: sent STRONG BUY email to {sent} subscriber(s)")
+        except Exception as e:
+            print(f"alerts: subscriber notify failed: {e}")
 
 
 def _seconds_until_next_check():

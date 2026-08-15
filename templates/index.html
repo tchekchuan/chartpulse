@@ -194,6 +194,26 @@
     .screen-rating{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
     #screenerBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
     #screenerBtn:hover{border-color:#58a6ff;color:#58a6ff}
+    #subscribeBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
+    #subscribeBtn:hover{border-color:#ff6b4a;color:#ff6b4a}
+
+    #subscribeOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:center;justify-content:center}
+    #subscribeOverlay.open{display:flex}
+    #subscribeModal{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:24px;width:360px;max-width:90vw}
+    #subscribeHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+    #subscribeHead h3{font-size:1.05rem;color:#c9d1d9}
+    #subscribeClose{background:none;border:none;color:#8b949e;cursor:pointer;font-size:.85rem}
+    #subscribeClose:hover{color:#c9d1d9}
+    #subscribeBlurb{font-size:.82rem;color:#8b949e;margin-bottom:16px;line-height:1.5}
+    #subscribeForm{display:flex;gap:8px}
+    #subscribeEmail{flex:1;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:8px 11px;font-size:.9rem;outline:none}
+    #subscribeEmail:focus{border-color:#ff6b4a}
+    #subscribeSubmit{background:#ff6b4a;border:none;border-radius:6px;color:#0d1117;font-weight:700;padding:8px 14px;font-size:.85rem;cursor:pointer}
+    #subscribeSubmit:hover{background:#ff8267}
+    #subscribeSubmit:disabled{opacity:.6;cursor:default}
+    #subscribeStatus{margin-top:12px;font-size:.82rem}
+    #subscribeStatus.ok{color:#3fb950}
+    #subscribeStatus.err{color:#f85149}
     #screenerPresets{padding:8px 18px;border-bottom:1px solid #21262d;display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex-shrink:0;background:#0d1117}
     .preset-btn{font-size:.75rem;padding:4px 11px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;cursor:pointer;white-space:nowrap;transition:.15s}
     .preset-btn:hover{border-color:#58a6ff;color:#58a6ff;background:#1c2333}
@@ -233,8 +253,24 @@
     </select>
     <button id="loadBtn">Load</button>
     <button id="screenerBtn">🔍 Screener</button>
+    <button id="subscribeBtn">🔔 Subscribe</button>
   </div>
 </header>
+
+<div id="subscribeOverlay">
+  <div id="subscribeModal">
+    <div id="subscribeHead">
+      <h3>🔔 Get STRONG BUY Alerts</h3>
+      <button id="subscribeClose">✕ Close</button>
+    </div>
+    <p id="subscribeBlurb">Get an email whenever a symbol on getChartPulse's watchlist hits a STRONG BUY rating. Free, unsubscribe anytime.</p>
+    <div id="subscribeForm">
+      <input type="email" id="subscribeEmail" placeholder="you@example.com" autocomplete="email"/>
+      <button id="subscribeSubmit">Subscribe</button>
+    </div>
+    <div id="subscribeStatus"></div>
+  </div>
+</div>
 
 <!-- Screener Modal -->
 <div id="screenerOverlay">
@@ -1215,6 +1251,49 @@ input.addEventListener('keydown', e => {
   if (e.key === 'Enter') { sugg.style.display='none'; loadStock(); }
 });
 document.getElementById('loadBtn').addEventListener('click', loadStock);
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Subscribe
+// ══════════════════════════════════════════════════════════════════════════════
+const subOverlay = document.getElementById('subscribeOverlay');
+const subEmail   = document.getElementById('subscribeEmail');
+const subStatus  = document.getElementById('subscribeStatus');
+const subSubmit  = document.getElementById('subscribeSubmit');
+
+document.getElementById('subscribeBtn').addEventListener('click', () => {
+  subOverlay.classList.add('open');
+  subStatus.textContent = '';
+  subStatus.className = '';
+  subEmail.focus();
+});
+document.getElementById('subscribeClose').addEventListener('click', () => subOverlay.classList.remove('open'));
+subOverlay.addEventListener('click', e => { if (e.target === subOverlay) subOverlay.classList.remove('open'); });
+
+async function doSubscribe() {
+  const email = subEmail.value.trim();
+  if (!email) return;
+  subSubmit.disabled = true;
+  subStatus.textContent = 'Sending…';
+  subStatus.className = '';
+  try {
+    const res  = await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email}),
+    });
+    const data = await res.json();
+    subStatus.textContent = data.message || (data.ok ? 'Done.' : 'Something went wrong.');
+    subStatus.className = data.ok ? 'ok' : 'err';
+    if (data.ok) subEmail.value = '';
+  } catch (err) {
+    subStatus.textContent = 'Network error — try again.';
+    subStatus.className = 'err';
+  } finally {
+    subSubmit.disabled = false;
+  }
+}
+document.getElementById('subscribeSubmit').addEventListener('click', doSubscribe);
+subEmail.addEventListener('keydown', e => { if (e.key === 'Enter') doSubscribe(); });
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  Screener

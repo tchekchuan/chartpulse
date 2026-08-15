@@ -1595,7 +1595,32 @@ def alert_check():
     return jsonify({"ok": True})
 
 
-import alerts  # noqa: E402  (imports analyze_symbol from this module)
+@app.route("/api/subscribe", methods=["POST"])
+def subscribe_route():
+    email = (request.json or {}).get("email", "") if request.is_json else request.form.get("email", "")
+    ok, message = subscribers.subscribe(email)
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+
+
+@app.route("/api/subscribe/confirm")
+def subscribe_confirm_route():
+    email = subscribers.confirm(request.args.get("token", ""))
+    if email:
+        return "<h2>Subscribed!</h2><p>You'll get an email whenever a STRONG BUY signal fires on getChartPulse's watchlist. You can close this tab.</p>"
+    return "<h2>Invalid or expired link.</h2>", 400
+
+
+@app.route("/api/subscribe/unsubscribe")
+def subscribe_unsubscribe_route():
+    email = subscribers.unsubscribe(request.args.get("token", ""))
+    if email:
+        return "<h2>Unsubscribed.</h2><p>You won't receive any more getChartPulse alerts.</p>"
+    return "<h2>Invalid or already removed.</h2>", 400
+
+
+import alerts        # noqa: E402  (imports analyze_symbol from this module)
+import subscribers   # noqa: E402
+subscribers.init_db()
 alerts.start_scheduler()
 
 
