@@ -11,20 +11,18 @@
 
 import json
 import os
-import smtplib
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
 from pathlib import Path
 
 import requests
 
+from mailer import send_email as _mailer_send_email
+
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 
-GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
 ALERT_EMAIL_TO     = os.environ.get("ALERT_EMAIL_TO")
 
 STATE_FILE = Path(__file__).parent / "alert_state.json"
@@ -77,22 +75,10 @@ def send_telegram(text):
 
 
 def send_email(subject, body):
-    if not (GMAIL_ADDRESS and GMAIL_APP_PASSWORD and ALERT_EMAIL_TO):
-        print("alerts: GMAIL_ADDRESS/GMAIL_APP_PASSWORD/ALERT_EMAIL_TO not set, skipping email")
+    if not ALERT_EMAIL_TO:
+        print("alerts: ALERT_EMAIL_TO not set, skipping email")
         return False
-    try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = GMAIL_ADDRESS
-        msg["To"] = ALERT_EMAIL_TO
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-            server.starttls()
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, [ALERT_EMAIL_TO], msg.as_string())
-        return True
-    except Exception as e:
-        print(f"alerts: Email send failed: {e}")
-        return False
+    return _mailer_send_email(ALERT_EMAIL_TO, subject, body)
 
 
 def check_and_alert():

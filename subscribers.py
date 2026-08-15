@@ -9,18 +9,16 @@
 import os
 import re
 import secrets
-import smtplib
-from email.mime.text import MIMEText
 
 import psycopg2
+
+from mailer import send_email as _send_email
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
-SITE_URL           = "https://getchartpulse.com"
+SITE_URL = "https://getchartpulse.com"
 
 
 def _conn():
@@ -44,25 +42,6 @@ def init_db():
             """)
         conn.commit()
     print("subscribers: table ready")
-
-
-def _send_email(to_addr, subject, body):
-    if not (GMAIL_ADDRESS and GMAIL_APP_PASSWORD):
-        print("subscribers: GMAIL_ADDRESS/GMAIL_APP_PASSWORD not set, skipping email")
-        return False
-    try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = GMAIL_ADDRESS
-        msg["To"] = to_addr
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-            server.starttls()
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, [to_addr], msg.as_string())
-        return True
-    except Exception as e:
-        print(f"subscribers: email to {to_addr} failed: {e}")
-        return False
 
 
 def subscribe(email):
