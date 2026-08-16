@@ -10,13 +10,19 @@
 # free-tier hosting to prevent spam abuse). Switched to Resend's
 # HTTP API instead -- port 443 is never blocked, since that would
 # break the platform's own core purpose of serving web traffic.
+#
+# 2026-08-16: getchartpulse.com verified as a sending domain in
+# Resend (DKIM/SPF/MX records added to GoDaddy) -- switched off
+# Resend's shared onboarding@resend.dev test sender, which could
+# only reliably deliver to the account owner's own address. Real
+# external subscribers can now actually receive mail.
 # ============================================================
 
 import os
 import requests
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
-FROM_ADDRESS    = "getChartPulse <onboarding@resend.dev>"  # Resend's shared test sender -- works without a verified domain
+FROM_ADDRESS    = "getChartPulse <alerts@getchartpulse.com>"
 
 
 def send_email(to_addr, subject, body):
