@@ -1596,6 +1596,7 @@ def analyze_symbol(sym, period="1y", interval="1d"):
             "rr":          best_buy.get("rr", 0) if best_buy else 0,
             "stars":       best_buy.get("stars", 0) if best_buy else 0,
             "suggested_position_pct": arating.get("suggested_position_pct"),
+            "risk_per_trade_pct":     arating.get("risk_per_trade_pct"),
             "sentiment":   sentiment["label"],
             "sent_color":  ("#3fb950" if sentiment["score"] >= 0.15
                             else "#f85149" if sentiment["score"] <= -0.15

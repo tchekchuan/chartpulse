@@ -194,8 +194,24 @@
     .screen-rating{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
     #screenerBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
     #screenerBtn:hover{border-color:#58a6ff;color:#58a6ff}
+    #portfolioBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
+    #portfolioBtn:hover{border-color:#a78bfa;color:#a78bfa}
     #subscribeBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
     #subscribeBtn:hover{border-color:#ff6b4a;color:#ff6b4a}
+
+    /* Portfolio modal — reuses .screen-table/.screen-row/.screen-sym/.screen-rating from the Screener */
+    #portfolioOverlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:none;align-items:center;justify-content:center}
+    #portfolioModal{background:#161b22;border:1px solid #30363d;border-radius:10px;width:96%;max-width:960px;height:87vh;display:flex;flex-direction:column;overflow:hidden}
+    #portfolioHead{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid #30363d;flex-shrink:0}
+    #portfolioHead h2{font-size:.95rem;font-weight:700;color:#a78bfa}
+    #portfolioClose{background:none;border:1px solid #30363d;border-radius:5px;color:#8b949e;padding:3px 9px;cursor:pointer;font-size:.85rem}
+    #portfolioClose:hover{border-color:#f85149;color:#f85149}
+    #portfolioBody{flex:1;overflow-y:auto;padding:0}
+    #portfolioStatus{padding:14px 18px;color:#8b949e;font-size:.84rem}
+    #portfolioCorrelation{padding:14px 18px;border-top:1px solid #21262d;font-size:.78rem;color:#c9d1d9}
+    #portfolioCorrelation h3{font-size:.78rem;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+    .corr-pill{display:inline-block;padding:2px 9px;border-radius:20px;background:#21262d;border:1px solid #30363d;font-size:.72rem;margin:2px 4px 2px 0}
+    .corr-pair-warn{color:#e3b341;font-size:.78rem;padding:2px 0}
 
     #subscribeOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:center;justify-content:center}
     #subscribeOverlay.open{display:flex}
@@ -253,6 +269,7 @@
     </select>
     <button id="loadBtn">Load</button>
     <button id="screenerBtn">🔍 Screener</button>
+    <button id="portfolioBtn">📁 Portfolio</button>
     <button id="subscribeBtn">🔔 Subscribe</button>
   </div>
 </header>
@@ -323,6 +340,24 @@
           Enter stock symbols above and click <strong>Run Screen</strong> to analyze.
           <br><br>Click any row to load that stock in the chart.
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Portfolio Modal -->
+<div id="portfolioOverlay">
+  <div id="portfolioModal">
+    <div id="portfolioHead">
+      <h2>📁 Portfolio — Ratings, Position Sizing &amp; Correlation</h2>
+      <button id="portfolioClose">✕ Close</button>
+    </div>
+    <div id="portfolioBody">
+      <div id="portfolioStatus">Loading holdings…</div>
+      <div id="portfolioResults"></div>
+      <div id="portfolioCorrelation" style="display:none">
+        <h3>Diversification — pairwise return correlation</h3>
+        <div id="portfolioCorrSummary"></div>
       </div>
     </div>
   </div>
@@ -1437,6 +1472,116 @@ function renderScreenerTable(data) {
       loadStock();
     });
   });
+}
+
+// ── Portfolio modal ──────────────────────────────────────────────────────
+let _portfolioLoaded = false;
+
+function openPortfolio() {
+  document.getElementById('portfolioOverlay').style.display = 'flex';
+  if (!_portfolioLoaded) loadPortfolio();
+}
+function closePortfolio() { document.getElementById('portfolioOverlay').style.display = 'none'; }
+
+document.getElementById('portfolioBtn').addEventListener('click', openPortfolio);
+document.getElementById('portfolioClose').addEventListener('click', closePortfolio);
+document.getElementById('portfolioOverlay').addEventListener('click', e => {
+  if (e.target.id === 'portfolioOverlay') closePortfolio();
+});
+
+async function loadPortfolio() {
+  const status = document.getElementById('portfolioStatus');
+  const results = document.getElementById('portfolioResults');
+  const corrBox = document.getElementById('portfolioCorrelation');
+  status.style.display = 'block';
+  status.textContent = 'Loading holdings and computing correlations… (est. 20–40 s)';
+  corrBox.style.display = 'none';
+
+  try {
+    const res  = await fetch('/api/portfolio');
+    const data = await res.json();
+    _portfolioLoaded = true;
+    status.style.display = 'none';
+    renderPortfolioTable(data.holdings || []);
+    renderPortfolioCorrelation(data.avg_correlation || {}, data.high_correlation_pairs || []);
+  } catch (err) {
+    status.style.display = 'block';
+    status.textContent = `Error: ${err.message}`;
+  }
+}
+
+function renderPortfolioTable(holdings) {
+  const results = document.getElementById('portfolioResults');
+  if (!holdings.length) {
+    results.innerHTML = `<div style="color:#8b949e;text-align:center;padding:24px">No holdings configured.</div>`;
+    return;
+  }
+  let html = `<table class="screen-table"><thead><tr>
+    <th>Symbol</th><th>Rating</th><th>Price</th><th>Change</th>
+    <th>Stage</th><th>RSI</th><th>Suggested Size</th><th>Key Reason</th>
+  </tr></thead><tbody>`;
+  holdings.forEach(d => {
+    if (d.error) {
+      html += `<tr><td class="screen-sym" style="color:#f85149">${d.symbol}</td>
+        <td colspan="7" style="color:#8b949e;font-size:.76rem">⚠ ${d.error}</td></tr>`;
+      return;
+    }
+    const chgColor  = d.change > 0 ? '#3fb950' : d.change < 0 ? '#f85149' : '#8b949e';
+    const rsiColor  = d.rsi <= 30 ? '#3fb950' : d.rsi >= 70 ? '#f85149' : d.rsi >= 50 ? '#58a6ff' : '#8b949e';
+    const stageIcon = {2:'↑',4:'↓',3:'⚠',1:'—'}[d.stage] || '—';
+    const sizeTxt   = (d.suggested_position_pct != null) ? `~${d.suggested_position_pct.toFixed(1)}%` : '—';
+    html += `<tr class="screen-row" data-sym="${d.symbol}" title="${(d.verdict||'').replace(/"/g,"'")}">
+      <td><div class="screen-sym">${d.symbol}</div>${d.name ? `<div class="screen-name">${d.name}</div>` : ''}</td>
+      <td><span class="screen-rating" style="color:${d.color};border-color:${d.color};background:${d.color}22">${d.rating}</span></td>
+      <td style="font-family:monospace;font-size:.83rem">${d.price.toFixed(2)}</td>
+      <td style="color:${chgColor};font-size:.83rem">${d.change>0?'+':''}${d.change.toFixed(2)}%</td>
+      <td style="color:${d.stage_color||'#8b949e'};font-size:.8rem">${stageIcon} ${d.stage}</td>
+      <td style="color:${rsiColor};font-size:.83rem">${d.rsi.toFixed(0)}</td>
+      <td style="font-family:monospace;font-size:.83rem;color:#a78bfa">${sizeTxt}</td>
+      <td style="font-size:.74rem;color:#8b949e;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.reason||'—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  html += `<div style="padding:10px 18px;font-size:.72rem;color:#8b949e">
+    Position sizing assumes risking ${holdings.find(h=>!h.error)?.risk_per_trade_pct ?? 1}% of total portfolio per trade
+    against the stop, capped at 20%. Adjust for your own risk tolerance — not financial advice.
+  </div>`;
+  results.innerHTML = html;
+
+  results.querySelectorAll('.screen-row').forEach(row => {
+    row.addEventListener('click', () => {
+      document.getElementById('symbolInput').value = row.dataset.sym;
+      closePortfolio();
+      loadStock();
+    });
+  });
+}
+
+function renderPortfolioCorrelation(avgCorr, highPairs) {
+  const corrBox = document.getElementById('portfolioCorrelation');
+  const summary = document.getElementById('portfolioCorrSummary');
+  const syms = Object.keys(avgCorr);
+  if (!syms.length) { corrBox.style.display = 'none'; return; }
+
+  let html = `<div style="margin-bottom:8px">Average correlation with the rest of the portfolio (higher = moves together, less diversification benefit):</div>`;
+  syms.forEach(s => {
+    const v = avgCorr[s];
+    if (v == null) { html += `<span class="corr-pill">${s}: n/a</span>`; return; }
+    const color = v >= 0.7 ? '#f85149' : v >= 0.4 ? '#e3b341' : '#3fb950';
+    html += `<span class="corr-pill" style="color:${color};border-color:${color}44">${s}: ${v.toFixed(2)}</span>`;
+  });
+
+  if (highPairs.length) {
+    html += `<div style="margin-top:10px">`;
+    highPairs.forEach(p => {
+      html += `<div class="corr-pair-warn">⚠ ${p.a} &amp; ${p.b} move together (correlation ${p.correlation.toFixed(2)}) — limited diversification benefit holding both.</div>`;
+    });
+    html += `</div>`;
+  } else {
+    html += `<div style="margin-top:10px;color:#3fb950;font-size:.78rem">✓ No highly correlated pairs (≥0.7) — holdings are reasonably diversified from each other.</div>`;
+  }
+  summary.innerHTML = html;
+  corrBox.style.display = 'block';
 }
 
 // Initial load
