@@ -1709,6 +1709,24 @@ def portfolio_view():
     })
 
 
+@app.route("/api/ark-trades")
+def ark_trades_route():
+    """Cathie Wood / ARK Invest's inferred daily trades for ARKK. ARK
+    publishes daily holdings snapshots, not an explicit trades feed, so
+    this fetches today's snapshot and diffs it against the previous one
+    on file (ark_tracker.py)."""
+    try:
+        ark_tracker.fetch_and_store()
+    except Exception:
+        pass  # still show whatever's already on file if today's fetch fails
+    trades, latest_date, prev_date = ark_tracker.get_latest_trades()
+    return jsonify({
+        "trades":        trades,
+        "latest_date":   latest_date,
+        "previous_date": prev_date,
+    })
+
+
 @app.route("/api/search")
 def search_ticker():
     q = request.args.get("q", "")
@@ -1789,7 +1807,9 @@ def subscribe_unsubscribe_route():
 
 import alerts        # noqa: E402  (imports analyze_symbol from this module)
 import subscribers   # noqa: E402
+import ark_tracker   # noqa: E402
 subscribers.init_db()
+ark_tracker.init_db()
 alerts.start_scheduler()
 
 
