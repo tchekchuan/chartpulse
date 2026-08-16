@@ -107,6 +107,18 @@ def get_confirmed_subscribers():
             return cur.fetchall()
 
 
+def get_all_subscribers():
+    """Returns [(email, confirmed, created_at), ...] for every row, newest first."""
+    if not DATABASE_URL:
+        return []
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT email, confirmed, created_at FROM subscribers ORDER BY created_at DESC"
+            )
+            return cur.fetchall()
+
+
 def send_strong_buy_alert(lines_text):
     """Emails all confirmed subscribers the STRONG BUY summary."""
     subs = get_confirmed_subscribers()

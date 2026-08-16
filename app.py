@@ -1595,6 +1595,26 @@ def alert_check():
     return jsonify({"ok": True})
 
 
+@app.route("/api/subscribers")
+def subscribers_list_route():
+    """Read-only subscriber list for Shawn's own use — protected since the
+    site is fully public. Reuses ALERT_TEST_KEY (same secret as /api/alert-check)."""
+    key = request.args.get("key", "")
+    expected = os.environ.get("ALERT_TEST_KEY")
+    if not expected or key != expected:
+        return jsonify({"error": "forbidden"}), 403
+    rows = subscribers.get_all_subscribers()
+    return jsonify({
+        "total": len(rows),
+        "confirmed": sum(1 for _, c, _ in rows if c),
+        "pending": sum(1 for _, c, _ in rows if not c),
+        "subscribers": [
+            {"email": e, "confirmed": c, "created_at": t.isoformat() if t else None}
+            for e, c, t in rows
+        ],
+    })
+
+
 @app.route("/api/subscribe", methods=["POST"])
 def subscribe_route():
     email = (request.json or {}).get("email", "") if request.is_json else request.form.get("email", "")
