@@ -2,6 +2,7 @@ from flask import Flask, render_template, jsonify, request, session, redirect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import timedelta
 import logging
 import os
 import time
@@ -16,6 +17,11 @@ app.logger.setLevel(logging.INFO)
 # which just means existing sessions get invalidated on every restart --
 # harmless for this app, but set the env var on Render for real persistence.
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(32)
+# Login sessions stay valid this long on the same device/browser, so
+# subscribers don't have to re-login every visit -- set explicitly rather
+# than relying on Flask's 31-day default, since infrequent visitors would
+# otherwise get logged out sooner than intended.
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=180)
 
 # In-memory is fine here — Render runs this app as a single gunicorn worker,
 # so there's only one process to keep the counters in.
