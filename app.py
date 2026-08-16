@@ -1,4 +1,6 @@
 from flask import Flask, render_template, jsonify, request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import os
@@ -10,6 +12,10 @@ import numpy as np
 
 app = Flask(__name__)
 app.logger.setLevel(logging.INFO)
+
+# In-memory is fine here — Render runs this app as a single gunicorn worker,
+# so there's only one process to keep the counters in.
+limiter = Limiter(app=app, key_func=get_remote_address, default_limits=[])
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  UTILITY
@@ -1616,10 +1622,16 @@ def subscribers_list_route():
 
 
 @app.route("/api/subscribe", methods=["POST"])
+@limiter.limit("5 per hour")
 def subscribe_route():
     email = (request.json or {}).get("email", "") if request.is_json else request.form.get("email", "")
     ok, message = subscribers.subscribe(email)
     return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+
+
+@app.errorhandler(429)
+def rate_limited(e):
+    return jsonify({"ok": False, "message": "Too many attempts — please try again later."}), 429
 
 
 @app.route("/api/subscribe/confirm")
