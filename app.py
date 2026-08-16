@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 import logging
 import os
+import threading
 import time
 import requests
 import yfinance as yf
@@ -1856,13 +1857,17 @@ def search_ticker():
 @app.route("/api/alert-check")
 def alert_check():
     """Manual trigger for testing the Telegram alert job — protected since
-    the site is fully public and this pushes a message to a real phone."""
+    the site is fully public and this pushes a message to a real phone.
+    Runs check_and_alert() in a background thread and returns immediately:
+    with enough symbols across the fixed watchlist and subscriber
+    portfolios/watchlists, the job can run past gunicorn's worker timeout,
+    which previously got the whole worker SIGKILLed mid-request."""
     key = request.args.get("key", "")
     expected = os.environ.get("ALERT_TEST_KEY")
     if not expected or key != expected:
         return jsonify({"error": "forbidden"}), 403
-    alerts.check_and_alert()
-    return jsonify({"ok": True})
+    threading.Thread(target=alerts.check_and_alert, daemon=True).start()
+    return jsonify({"ok": True, "message": "Alert check started in the background — check Render logs for the result."})
 
 
 @app.route("/api/subscribers")
