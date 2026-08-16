@@ -109,6 +109,50 @@ def confirm(token):
     return email
 
 
+def confirm_email(email):
+    """Ensures email is a confirmed subscriber, creating the row if needed.
+    Used by the login flow (auth.py): successfully verifying a login
+    link/code is itself proof of email ownership, equivalent to the
+    double opt-in click, so a first-time login can subscribe someone in
+    one step instead of requiring a separate Subscribe-then-confirm
+    flow first. Returns True if this call just newly confirmed them (so
+    the caller knows to send the welcome email), False if already
+    confirmed or on invalid input."""
+    email = (email or "").strip().lower()
+    if not DATABASE_URL or not _EMAIL_RE.match(email):
+        return False
+
+    new_token = secrets.token_urlsafe(24)
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT confirmed, token FROM subscribers WHERE email = %s", (email,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return False  # already confirmed, nothing to do
+            if row:
+                cur.execute("UPDATE subscribers SET confirmed = TRUE WHERE email = %s", (email,))
+                token = row[1]
+            else:
+                cur.execute(
+                    "INSERT INTO subscribers (email, token, confirmed) VALUES (%s, %s, TRUE)",
+                    (email, new_token),
+                )
+                token = new_token
+        conn.commit()
+
+    unsub_url = f"{SITE_URL}/api/subscribe/unsubscribe?token={token}"
+    _send_email(
+        email,
+        "You're subscribed to getChartPulse alerts",
+        f"Logging in also subscribes you to getChartPulse alerts -- you'll get an email "
+        f"whenever a symbol on your My Portfolio or My Watchlist changes, plus the public "
+        f"STRONG BUY signal broadcast.\n\n"
+        f"Not financial advice -- always do your own research.\n\n"
+        f"---\nUnsubscribe anytime: {unsub_url}",
+    )
+    return True
+
+
 def unsubscribe(token):
     with _conn() as conn:
         with conn.cursor() as cur:

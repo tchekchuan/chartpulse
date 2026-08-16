@@ -1,12 +1,14 @@
 # ============================================================
 # File: auth.py
-# Date: 2026-08-16
-# Task: Magic-link login for confirmed subscribers, so they can
-#       manage their own "My Portfolio". Reuses the same
-#       email-click-to-verify pattern as subscribers.py's confirm
-#       flow -- no passwords, no OAuth, no new external service.
-#       Backed by Neon Postgres (Render's free tier has no
-#       persistent disk).
+# Date: 2026-08-16 (login doubles as sign-up added same day)
+# Task: Magic-link login so subscribers can manage their own "My
+#       Portfolio & Watchlist". Reuses the same email-click-to-verify
+#       pattern as subscribers.py's confirm flow -- no passwords, no
+#       OAuth, no new external service. First-time login auto-confirms
+#       the email as a subscriber (subscribers.confirm_email), since
+#       verifying the link/code is itself proof of ownership -- no
+#       separate Subscribe-then-confirm step required first. Backed by
+#       Neon Postgres (Render's free tier has no persistent disk).
 # ============================================================
 
 import os
@@ -16,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg2
 
+import subscribers
 from mailer import send_email as _send_email
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -24,7 +27,8 @@ SITE_URL = "https://getchartpulse.com"
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 LOGIN_TOKEN_TTL_MINUTES = 15
-GENERIC_MSG = "If that email is a confirmed subscriber, a login link is on its way."
+GENERIC_MSG = "Check your email for a login link and code."
+INVALID_MSG = "That doesn't look like a valid email address."
 
 
 def _conn():
@@ -56,19 +60,14 @@ def init_db():
 
 
 def request_login_link(email):
-    """Sends a magic login link only if the email is a confirmed
-    subscriber. Always returns the same generic message either way, so
-    this endpoint can't be used to enumerate who's subscribed."""
+    """Sends a magic login link to any valid email address -- no longer
+    requires already being a confirmed subscriber first. Verifying the
+    link/code is itself proof of email ownership (see verify_login_token
+    / verify_login_code below), so first-time login doubles as sign-up:
+    no separate Subscribe-then-confirm-then-login round trip needed."""
     email = (email or "").strip().lower()
     if not DATABASE_URL or not _EMAIL_RE.match(email):
-        return GENERIC_MSG
-
-    with _conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT confirmed FROM subscribers WHERE email = %s", (email,))
-            row = cur.fetchone()
-    if not row or not row[0]:
-        return GENERIC_MSG  # not a confirmed subscriber -- silently no-op
+        return INVALID_MSG
 
     token = secrets.token_urlsafe(32)
     code = "".join(secrets.choice("0123456789") for _ in range(6))
@@ -116,6 +115,7 @@ def verify_login_token(token):
                 return None
             cur.execute("UPDATE login_tokens SET used = TRUE WHERE token = %s", (token,))
         conn.commit()
+    subscribers.confirm_email(email)
     return email
 
 
@@ -147,4 +147,5 @@ def verify_login_code(email, code):
                 (email, code),
             )
         conn.commit()
+    subscribers.confirm_email(email)
     return email

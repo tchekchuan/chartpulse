@@ -1922,10 +1922,10 @@ def subscribe_unsubscribe_route():
 @app.route("/api/auth/request-link", methods=["POST"])
 @limiter.limit("5 per hour")
 def auth_request_link():
-    """Sends a magic login link to a confirmed subscriber. Only works for
-    people already in the subscribers table (you must confirm your email
-    via Subscribe first) -- login is proving you own that email again,
-    not a separate signup."""
+    """Sends a magic login link to any valid email -- first-time login
+    doubles as sign-up (auth.verify_login_token/verify_login_code confirm
+    the subscription once the email is proven owned), no separate
+    Subscribe-then-confirm step required first."""
     email = (request.json or {}).get("email", "") if request.is_json else request.form.get("email", "")
     message = auth.request_login_link(email)
     return jsonify({"ok": True, "message": message})
