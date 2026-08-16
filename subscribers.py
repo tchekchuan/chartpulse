@@ -80,23 +80,32 @@ def subscribe(email):
 
 
 def confirm(token):
+    """Marks a subscription confirmed and returns the email, or None if the
+    token doesn't exist. Sends the thank-you email only the first time --
+    mail clients/security scanners often prefetch links in incoming email,
+    which would otherwise hit this route (and re-send the email) before the
+    user ever clicks it themselves."""
     with _conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT confirmed FROM subscribers WHERE token = %s", (token,))
+            existing = cur.fetchone()
+            if not existing:
+                return None
+            already_confirmed = existing[0]
             cur.execute("UPDATE subscribers SET confirmed = TRUE WHERE token = %s RETURNING email", (token,))
             row = cur.fetchone()
         conn.commit()
-    if not row:
-        return None
     email = row[0]
-    unsub_url = f"{SITE_URL}/api/subscribe/unsubscribe?token={token}"
-    _send_email(
-        email,
-        "You're subscribed to getChartPulse alerts",
-        f"Thanks for subscribing! You'll get an email whenever a symbol on getChartPulse's "
-        f"watchlist hits a STRONG BUY rating.\n\n"
-        f"Not financial advice -- always do your own research.\n\n"
-        f"---\nUnsubscribe anytime: {unsub_url}",
-    )
+    if not already_confirmed:
+        unsub_url = f"{SITE_URL}/api/subscribe/unsubscribe?token={token}"
+        _send_email(
+            email,
+            "You're subscribed to getChartPulse alerts",
+            f"Thanks for subscribing! You'll get an email whenever a symbol on getChartPulse's "
+            f"watchlist hits a STRONG BUY rating.\n\n"
+            f"Not financial advice -- always do your own research.\n\n"
+            f"---\nUnsubscribe anytime: {unsub_url}",
+        )
     return email
 
 
