@@ -468,6 +468,14 @@ def momentum_indicators(df):
             rsi_ts.append({"time": int(pd.Timestamp(ts).timestamp()),
                            "value": round(float(v), 2)})
 
+    # Volume vs 20-day average -- classic TA treats a breakout/crossover on
+    # above-average volume as more reliable, and one on thin volume as
+    # weaker/more likely to fail. Used to adjust MACD crossover confidence.
+    vol        = df["Volume"] if "Volume" in df.columns else pd.Series([0])
+    avg_vol_20 = vol.rolling(20).mean().iloc[-1]
+    vol_now    = float(vol.iloc[-1])
+    vol_ratio  = round(vol_now / avg_vol_20, 2) if avg_vol_20 and not np.isnan(avg_vol_20) and avg_vol_20 > 0 else 1.0
+
     return {
         "rsi":          rsi_now,
         "rsi_prev":     rsi_prev,
@@ -480,6 +488,7 @@ def momentum_indicators(df):
         "macd_cross_dn": macd_now < sig_now and macd_prev >= sig_prev,
         "hist_rising":  hist_now > hist_prev,
         "rsi_series":   rsi_ts,
+        "volume_ratio": vol_ratio,
     }
 
 
@@ -1098,10 +1107,21 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
         reasons.append(f"RSI {rsi:.0f} — below midline, caution")
 
     # ── MACD momentum ─────────────────────────────────────────────────────────
+    vol_ratio = momentum.get("volume_ratio", 1.0)
     if momentum.get("macd_cross_up"):
         score += 2; reasons.append("MACD bullish crossover — momentum turning positive (buy signal)")
+        # Volume confirmation: a crossover on above-average volume is a more
+        # reliable signal; on thin volume it's more likely to fail/reverse.
+        if vol_ratio >= 1.5:
+            score += 1; reasons.append(f"Volume: {vol_ratio:.1f}x 20-day average — crossover backed by real buying pressure")
+        elif vol_ratio < 0.7:
+            score -= 1; reasons.append(f"Volume: {vol_ratio:.1f}x 20-day average — crossover lacks conviction, treat cautiously")
     elif momentum.get("macd_cross_dn"):
         score -= 2; reasons.append("MACD bearish crossover — momentum turning negative (sell signal)")
+        if vol_ratio >= 1.5:
+            score -= 1; reasons.append(f"Volume: {vol_ratio:.1f}x 20-day average — breakdown backed by real selling pressure")
+        elif vol_ratio < 0.7:
+            score += 1; reasons.append(f"Volume: {vol_ratio:.1f}x 20-day average — breakdown lacks conviction, treat cautiously")
     elif momentum.get("macd_above") and momentum.get("hist_rising"):
         score += 1; reasons.append("MACD histogram expanding — sustained buying pressure")
     elif not momentum.get("macd_above") and not momentum.get("hist_rising"):
@@ -1215,7 +1235,7 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
         "rating":  rating,
         "score":   score,
         "color":   color,
-        "reasons": reasons[:6],
+        "reasons": reasons[:7],
         "verdict": " ".join(verdict_parts),
         "target":  best_buy.get("target")  if best_buy  else None,
         "stop":    best_buy.get("stop")    if best_buy  else None,
