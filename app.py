@@ -1728,6 +1728,13 @@ def _portfolio_view_for(symbols):
 
 @app.route("/api/portfolio")
 def portfolio_view():
+    """Shawn's own held-portfolio view -- key-protected since the site is
+    fully public and this reveals his actual positions. Same auth pattern
+    as /api/subscribers and /api/alert-check."""
+    key = request.args.get("key", "")
+    expected = os.environ.get("ALERT_TEST_KEY")
+    if not expected or key != expected:
+        return jsonify({"error": "forbidden"}), 403
     return jsonify(_portfolio_view_for(alerts.PORTFOLIO))
 
 
