@@ -1659,7 +1659,12 @@ def portfolio_view():
             df = yf.Ticker(sym).history(period="1y", interval="1d")
             if df is None or df.empty:
                 return sym, None
-            return sym, df["Close"].pct_change().dropna()
+            r = df["Close"].pct_change().dropna()
+            # Portfolio spans HKEX/Nasdaq Stockholm/NYSE -- each comes back
+            # tz-aware in its own exchange's local timezone, so the same
+            # calendar day won't align across symbols unless normalized.
+            r.index = pd.to_datetime(r.index.date)
+            return sym, r
         except Exception:
             return sym, None
 
@@ -1671,13 +1676,18 @@ def portfolio_view():
 
     corr_matrix, avg_correlation, high_correlation_pairs = {}, {}, []
     if len(returns) >= 2:
-        rdf  = pd.DataFrame(returns).dropna()
+        # No blanket dropna() here -- .corr() does pairwise-complete
+        # correlation per column pair by default, which is the correct way
+        # to handle markets whose holiday calendars don't fully overlap.
+        rdf  = pd.DataFrame(returns)
         corr = rdf.corr()
-        corr_matrix = {a: {b: round(float(corr.loc[a, b]), 2) for b in corr.columns}
-                        for a in corr.index}
+        # NaN (too few overlapping trading days for a given pair) can't
+        # serialize to valid JSON -- surface as null rather than "NaN".
+        corr_matrix = {a: {b: (round(float(corr.loc[a, b]), 2) if not np.isnan(corr.loc[a, b]) else None)
+                            for b in corr.columns} for a in corr.index}
         for sym in corr.index:
-            others = [corr.loc[sym, b] for b in corr.columns if b != sym]
-            avg_correlation[sym] = round(float(sum(others) / len(others)), 2) if others else 0.0
+            others = [corr.loc[sym, b] for b in corr.columns if b != sym and not np.isnan(corr.loc[sym, b])]
+            avg_correlation[sym] = round(float(sum(others) / len(others)), 2) if others else None
 
         seen = set()
         for a in corr.index:
@@ -1686,7 +1696,7 @@ def portfolio_view():
                     continue
                 seen.add((a, b))
                 c = float(corr.loc[a, b])
-                if c >= 0.7:
+                if not np.isnan(c) and c >= 0.7:
                     high_correlation_pairs.append({"a": a, "b": b, "correlation": round(c, 2)})
         high_correlation_pairs.sort(key=lambda x: x["correlation"], reverse=True)
 
