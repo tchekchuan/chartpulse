@@ -697,6 +697,35 @@ def _fetch_finnhub_fundamentals(sym):
     }
 
 
+def _fetch_finnhub_quote(sym):
+    """
+    Real-time (or near-real-time) US-equity quote from Finnhub's free
+    /quote endpoint -- used as the primary live price source in get_stock()
+    below instead of yfinance's fast_info, which is both slower and the
+    same Yahoo endpoint family already confirmed rate-limited/blocked from
+    this app's cloud hosting IP (see get_fundamentals above).
+
+    Finnhub's free tier only reliably covers US-listed tickers, so callers
+    should skip this for symbols with an exchange suffix (e.g. "1810.HK",
+    "CAST.ST") and use yfinance for those instead. Returns None (never
+    raises past here) if the quote looks empty/unavailable, so the caller
+    can fall through to the yfinance path unconditionally.
+    """
+    r = requests.get(
+        "https://finnhub.io/api/v1/quote",
+        params={"symbol": sym, "token": FINNHUB_API_KEY}, timeout=6,
+    )
+    q = r.json()
+    price, prev, ts = q.get("c"), q.get("pc"), q.get("t")
+    if not price or price <= 0 or not ts:
+        return None  # symbol not covered / no data -- let caller fall back
+    return {
+        "price":      round(float(price), 4),
+        "prev_close": round(float(prev), 4) if prev else None,
+        "priced_at":  int(ts),
+    }
+
+
 def get_fundamentals(ticker_obj):
     """
     Extracts key Buffett-style fundamental metrics.
@@ -1466,25 +1495,39 @@ def get_stock():
         patterns = candlestick_patterns(df, atr_val)
         signals  = trade_signals(df, pp, fractals, vp, mas, rounds, periods, momentum, stage)
 
-        # Price meta — fall back to the historical bar (df) if fast_info is
-        # missing, NaN, or otherwise unreliable. fast_info.last_price is a
-        # live quote that intermittently comes back None/NaN from Yahoo
-        # (rate limiting, pre/post-market gaps, etc.); using it unchecked
-        # risks either a crash (round(None)) or a nonsensical price shown
-        # as if it were real. analyze_symbol() already had this same
-        # fallback for alerts/screener — this route (the one users actually
-        # look at) needs the same protection, not less.
+        # Price meta — prefer Finnhub's real-time quote for US-listed
+        # symbols (faster than Yahoo, and not subject to the cloud-IP
+        # rate limiting noted in get_fundamentals above), then fall back
+        # to yfinance's fast_info, then to the historical bar itself if
+        # even that is missing/NaN. Every step is validated -- a bad or
+        # missing live quote must never silently become a wrong price
+        # shown as if it were real.
         last_close      = round(float(df["Close"].iloc[-1]), 4)
         last_prev_close = round(float(df["Close"].iloc[-2]), 4) if len(df) >= 2 else last_close
-        try:
-            info = ticker.fast_info
-            lp = info.last_price
-            pc = info.previous_close
-            price      = round(float(lp), 4) if lp and not np.isnan(float(lp)) else last_close
-            prev_close = round(float(pc), 4) if pc and not np.isnan(float(pc)) else last_prev_close
-            currency   = getattr(info, "currency", "USD") or "USD"
-        except Exception:
-            price, prev_close, currency = last_close, last_prev_close, "USD"
+        last_bar_ts     = candles[-1]["time"] if candles else None
+
+        price = prev_close = currency = priced_at = None
+        if FINNHUB_API_KEY and "." not in symbol:   # "." = exchange suffix (e.g. .HK, .ST) Finnhub free tier doesn't cover
+            try:
+                fq = _fetch_finnhub_quote(symbol)
+                if fq:
+                    price, priced_at = fq["price"], fq["priced_at"]
+                    prev_close = fq["prev_close"] or last_prev_close
+                    currency = "USD"  # Finnhub free tier is US-exchange quotes only
+            except Exception as e:
+                app.logger.warning(f"get_stock: Finnhub quote failed for {symbol}: {type(e).__name__}: {e}")
+
+        if price is None:
+            try:
+                info = ticker.fast_info
+                lp = info.last_price
+                pc = info.previous_close
+                price      = round(float(lp), 4) if lp and not np.isnan(float(lp)) else last_close
+                prev_close = round(float(pc), 4) if pc and not np.isnan(float(pc)) else last_prev_close
+                currency   = getattr(info, "currency", "USD") or "USD"
+            except Exception:
+                price, prev_close, currency = last_close, last_prev_close, "USD"
+            priced_at = last_bar_ts
 
         meta = {
             "symbol":     symbol,
@@ -1492,10 +1535,9 @@ def get_stock():
             "prev_close": prev_close,
             "currency":   currency,
             "atr":        round(atr_val, 4),
-            # Unix seconds of the most recent bar actually shown on the
-            # chart -- ground truth for "as of" in the UI, independent of
-            # whether the live fast_info quote above was usable or not.
-            "priced_at":  candles[-1]["time"] if candles else None,
+            # Unix seconds of the actual quote/bar used above -- ground
+            # truth for "as of" in the UI, whichever source won out.
+            "priced_at":  priced_at,
         }
 
         try:
