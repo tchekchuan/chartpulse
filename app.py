@@ -1165,6 +1165,24 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
     best_buy   = max(buy_zones,  key=lambda z: z.get("stars", 0), default=None)
     best_sell  = max(sell_zones, key=lambda z: z.get("stars", 0), default=None)
 
+    # ── Position sizing: fixed-fractional risk model ──────────────────────────
+    # Risking a fixed % of total portfolio per trade, sized off the stop
+    # distance, is standard risk management (Van Tharp / Jesse Livermore
+    # "always define risk before entry") that this tool previously gave a
+    # stop/target for but never translated into how much to actually buy.
+    # Capped so a very tight stop doesn't suggest an absurd concentration.
+    RISK_PER_TRADE_PCT = 1.0
+    MAX_POSITION_PCT   = 20.0
+    suggested_position_pct = None
+    if best_buy and best_buy.get("price") and best_buy.get("stop"):
+        entry = best_buy["price"]
+        stop  = best_buy["stop"]
+        risk_pct_of_price = abs(entry - stop) / entry * 100
+        if risk_pct_of_price > 0:
+            suggested_position_pct = round(
+                min(RISK_PER_TRADE_PCT / risk_pct_of_price * 100, MAX_POSITION_PCT), 1
+            )
+
     # News tilts the analyst's own verdict below, but must NOT mutate the zone
     # objects in `signals` — those are the same objects rendered in the Trade
     # Signals panel (and reused by the screener/portfolio-alert jobs), and a
@@ -1223,6 +1241,13 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
     elif val_score <= 1 and fundamentals:
         verdict_parts.append("Fundamentals are weak — treat this as a purely technical trade with strict risk management.")
 
+    # Position sizing
+    if suggested_position_pct is not None:
+        verdict_parts.append(
+            f"Suggested position size: ~{suggested_position_pct:.1f}% of portfolio "
+            f"(risking {RISK_PER_TRADE_PCT:.0f}% of total capital to the stop) — adjust for your own risk tolerance."
+        )
+
     # Closing
     if rating in ("STRONG BUY", "BUY"):
         verdict_parts.append("Overall: high-probability long setup — manage risk with defined stop loss.")
@@ -1241,6 +1266,8 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
         "stop":    best_buy.get("stop")    if best_buy  else None,
         "best_buy_price":  best_buy.get("price")  if best_buy  else None,
         "best_sell_price": best_sell.get("price") if best_sell else None,
+        "suggested_position_pct": suggested_position_pct,
+        "risk_per_trade_pct":     RISK_PER_TRADE_PCT,
     }
 
 
@@ -1568,6 +1595,7 @@ def analyze_symbol(sym, period="1y", interval="1d"):
             "stop":        arating.get("stop"),
             "rr":          best_buy.get("rr", 0) if best_buy else 0,
             "stars":       best_buy.get("stars", 0) if best_buy else 0,
+            "suggested_position_pct": arating.get("suggested_position_pct"),
             "sentiment":   sentiment["label"],
             "sent_color":  ("#3fb950" if sentiment["score"] >= 0.15
                             else "#f85149" if sentiment["score"] <= -0.15
@@ -1606,6 +1634,68 @@ def screen_stocks():
 
     results.sort(key=lambda x: x.get("score", -99), reverse=True)
     return jsonify(results)
+
+
+@app.route("/api/portfolio")
+def portfolio_view():
+    """
+    Portfolio-level view -- something no single-symbol page can show:
+    current rating + suggested position size for every held symbol
+    (alerts.PORTFOLIO), plus a pairwise daily-return correlation matrix
+    to surface hidden concentration risk (several "different" holdings
+    that actually move together, e.g. multiple high-beta momentum names).
+    """
+    symbols = alerts.PORTFOLIO
+
+    holdings = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(analyze_symbol, s, "1y"): s for s in symbols}
+        for fut in as_completed(futures):
+            holdings.append(fut.result())
+    holdings.sort(key=lambda x: x.get("score", -99), reverse=True)
+
+    def _fetch_returns(sym):
+        try:
+            df = yf.Ticker(sym).history(period="1y", interval="1d")
+            if df is None or df.empty:
+                return sym, None
+            return sym, df["Close"].pct_change().dropna()
+        except Exception:
+            return sym, None
+
+    returns = {}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        for sym, r in pool.map(_fetch_returns, symbols):
+            if r is not None and len(r) > 5:
+                returns[sym] = r
+
+    corr_matrix, avg_correlation, high_correlation_pairs = {}, {}, []
+    if len(returns) >= 2:
+        rdf  = pd.DataFrame(returns).dropna()
+        corr = rdf.corr()
+        corr_matrix = {a: {b: round(float(corr.loc[a, b]), 2) for b in corr.columns}
+                        for a in corr.index}
+        for sym in corr.index:
+            others = [corr.loc[sym, b] for b in corr.columns if b != sym]
+            avg_correlation[sym] = round(float(sum(others) / len(others)), 2) if others else 0.0
+
+        seen = set()
+        for a in corr.index:
+            for b in corr.columns:
+                if a == b or (b, a) in seen:
+                    continue
+                seen.add((a, b))
+                c = float(corr.loc[a, b])
+                if c >= 0.7:
+                    high_correlation_pairs.append({"a": a, "b": b, "correlation": round(c, 2)})
+        high_correlation_pairs.sort(key=lambda x: x["correlation"], reverse=True)
+
+    return jsonify({
+        "holdings":               holdings,
+        "correlation_matrix":     corr_matrix,
+        "avg_correlation":        avg_correlation,
+        "high_correlation_pairs": high_correlation_pairs,
+    })
 
 
 @app.route("/api/search")
