@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, session, redirect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,6 +12,10 @@ import numpy as np
 
 app = Flask(__name__)
 app.logger.setLevel(logging.INFO)
+# Falls back to a random per-process key if FLASK_SECRET_KEY isn't set,
+# which just means existing sessions get invalidated on every restart --
+# harmless for this app, but set the env var on Render for real persistence.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(32)
 
 # In-memory is fine here — Render runs this app as a single gunicorn worker,
 # so there's only one process to keep the counters in.
@@ -1637,16 +1641,18 @@ def screen_stocks():
     return jsonify(results)
 
 
-@app.route("/api/portfolio")
-def portfolio_view():
+def _portfolio_view_for(symbols):
     """
-    Portfolio-level view -- something no single-symbol page can show:
-    current rating + suggested position size for every held symbol
-    (alerts.PORTFOLIO), plus a pairwise daily-return correlation matrix
-    to surface hidden concentration risk (several "different" holdings
-    that actually move together, e.g. multiple high-beta momentum names).
+    Portfolio-level view for an arbitrary symbol list -- something no
+    single-symbol page can show: current rating + suggested position size
+    for each symbol, plus a pairwise daily-return correlation matrix to
+    surface hidden concentration risk (several "different" holdings that
+    actually move together, e.g. multiple high-beta momentum names).
+    Shared by the public /api/portfolio (alerts.PORTFOLIO) and the
+    login-gated /api/my-portfolio (a subscriber's own holdings).
     """
-    symbols = alerts.PORTFOLIO
+    if not symbols:
+        return {"holdings": [], "correlation_matrix": {}, "avg_correlation": {}, "high_correlation_pairs": []}
 
     holdings = []
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -1701,12 +1707,51 @@ def portfolio_view():
                     high_correlation_pairs.append({"a": a, "b": b, "correlation": round(c, 2)})
         high_correlation_pairs.sort(key=lambda x: x["correlation"], reverse=True)
 
-    return jsonify({
+    return {
         "holdings":               holdings,
         "correlation_matrix":     corr_matrix,
         "avg_correlation":        avg_correlation,
         "high_correlation_pairs": high_correlation_pairs,
-    })
+    }
+
+
+@app.route("/api/portfolio")
+def portfolio_view():
+    return jsonify(_portfolio_view_for(alerts.PORTFOLIO))
+
+
+@app.route("/api/my-portfolio")
+def my_portfolio_view():
+    """Login-gated: a subscriber's own portfolio, same rating/sizing/
+    correlation computation as the public view but scoped to their own
+    holdings (user_holdings.py)."""
+    email = session.get("email")
+    if not email:
+        return jsonify({"error": "not_logged_in"}), 401
+    symbols = user_holdings.get_holdings(email)
+    result = _portfolio_view_for(symbols)
+    result["symbols"] = symbols
+    return jsonify(result)
+
+
+@app.route("/api/my-portfolio/add", methods=["POST"])
+def my_portfolio_add():
+    email = session.get("email")
+    if not email:
+        return jsonify({"error": "not_logged_in"}), 401
+    ticker = (request.json or {}).get("ticker", "") if request.is_json else request.form.get("ticker", "")
+    ok, message = user_holdings.add_holding(email, ticker)
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+
+
+@app.route("/api/my-portfolio/remove", methods=["POST"])
+def my_portfolio_remove():
+    email = session.get("email")
+    if not email:
+        return jsonify({"error": "not_logged_in"}), 401
+    ticker = (request.json or {}).get("ticker", "") if request.is_json else request.form.get("ticker", "")
+    user_holdings.remove_holding(email, ticker)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/ark-trades")
@@ -1816,13 +1861,50 @@ def subscribe_unsubscribe_route():
     return "<h2>Invalid or already removed.</h2>", 400
 
 
-import alerts        # noqa: E402  (imports analyze_symbol from this module)
-import subscribers   # noqa: E402
-import ark_tracker   # noqa: E402
-import track_record  # noqa: E402
+@app.route("/api/auth/request-link", methods=["POST"])
+@limiter.limit("5 per hour")
+def auth_request_link():
+    """Sends a magic login link to a confirmed subscriber. Only works for
+    people already in the subscribers table (you must confirm your email
+    via Subscribe first) -- login is proving you own that email again,
+    not a separate signup."""
+    email = (request.json or {}).get("email", "") if request.is_json else request.form.get("email", "")
+    message = auth.request_login_link(email)
+    return jsonify({"ok": True, "message": message})
+
+
+@app.route("/api/auth/verify")
+def auth_verify():
+    email = auth.verify_login_token(request.args.get("token", ""))
+    if not email:
+        return "<h2>Invalid or expired login link.</h2><p>Request a new one from the site.</p>", 400
+    session["email"] = email
+    session.permanent = True
+    return redirect("/?logged_in=1")
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    session.pop("email", None)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/auth/me")
+def auth_me():
+    return jsonify({"email": session.get("email")})
+
+
+import alerts         # noqa: E402  (imports analyze_symbol from this module)
+import subscribers    # noqa: E402
+import ark_tracker    # noqa: E402
+import track_record   # noqa: E402
+import auth           # noqa: E402
+import user_holdings  # noqa: E402
 subscribers.init_db()
 ark_tracker.init_db()
 track_record.init_db()
+auth.init_db()
+user_holdings.init_db()
 alerts.start_scheduler()
 
 
