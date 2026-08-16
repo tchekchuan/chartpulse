@@ -85,21 +85,27 @@ def request_login_link(email):
 
 
 def verify_login_token(token):
-    """Consumes a login token if valid and unexpired (single-use).
-    Returns the email on success, or None."""
+    """Verifies a login token and returns its email if valid and
+    unexpired, or None. Deliberately NOT single-use within the TTL --
+    mail clients (iOS Mail, Gmail, etc.) commonly prefetch/scan links in
+    incoming email before a human ever clicks them, same issue already
+    hit and fixed for the subscribe-confirm flow. A strictly single-use
+    token would mean the real user's own click almost always fails
+    because their mail client already burned it. `used`/`used_at` are
+    still recorded, purely for visibility -- they don't gate anything."""
     if not DATABASE_URL or not token:
         return None
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT email, expires_at, used FROM login_tokens WHERE token = %s",
+                "SELECT email, expires_at FROM login_tokens WHERE token = %s",
                 (token,),
             )
             row = cur.fetchone()
             if not row:
                 return None
-            email, expires_at, used = row
-            if used or expires_at < datetime.now(timezone.utc):
+            email, expires_at = row
+            if expires_at < datetime.now(timezone.utc):
                 return None
             cur.execute("UPDATE login_tokens SET used = TRUE WHERE token = %s", (token,))
         conn.commit()
