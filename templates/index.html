@@ -261,18 +261,22 @@
     #loggedInAs{font-size:.78rem;color:#8b949e}
     #logoutBtn{background:none;border:1px solid #30363d;border-radius:5px;color:#8b949e;padding:3px 9px;cursor:pointer;font-size:.76rem}
     #logoutBtn:hover{border-color:#f85149;color:#f85149}
-    #addSymbolForm{display:flex;gap:8px;margin-bottom:14px}
-    #addSymbolWrap{position:relative;flex:1;max-width:280px}
-    #addSymbolInput{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:7px 10px;font-size:.85rem;outline:none}
-    #addSymbolInput:focus{border-color:#f0883e}
-    #addSymbolSuggestions{position:absolute;top:100%;left:0;right:0;background:#161b22;border:1px solid #30363d;border-radius:0 0 6px 6px;z-index:200;display:none;max-height:220px;overflow-y:auto}
-    #addSymbolSuggestions div{padding:7px 12px;cursor:pointer;font-size:.85rem}
-    #addSymbolSuggestions div:hover{background:#1f2937}
-    #addSymbolSuggestions .sym{font-weight:700;color:#f0883e;margin-right:6px}
-    #addSymbolBtn{background:#f0883e;border:none;border-radius:6px;color:#0d1117;font-weight:700;padding:7px 14px;font-size:.83rem;cursor:pointer}
-    #addSymbolBtn:hover{background:#ffa657}
-    .holding-remove{background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;padding:1px 7px;cursor:pointer;font-size:.72rem}
-    .holding-remove:hover{border-color:#f85149;color:#f85149}
+    #addSymbolForm, #addWatchForm{display:flex;gap:8px;margin-bottom:14px}
+    #addSymbolWrap, #addWatchWrap{position:relative;flex:1;max-width:280px}
+    #addSymbolInput, #addWatchInput{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:7px 10px;font-size:.85rem;outline:none}
+    #addSymbolInput:focus, #addWatchInput:focus{border-color:#f0883e}
+    #addSymbolSuggestions, #addWatchSuggestions{position:absolute;top:100%;left:0;right:0;background:#161b22;border:1px solid #30363d;border-radius:0 0 6px 6px;z-index:200;display:none;max-height:220px;overflow-y:auto}
+    #addSymbolSuggestions div, #addWatchSuggestions div{padding:7px 12px;cursor:pointer;font-size:.85rem}
+    #addSymbolSuggestions div:hover, #addWatchSuggestions div:hover{background:#1f2937}
+    #addSymbolSuggestions .sym, #addWatchSuggestions .sym{font-weight:700;color:#f0883e;margin-right:6px}
+    #addSymbolBtn, #addWatchBtn{background:#f0883e;border:none;border-radius:6px;color:#0d1117;font-weight:700;padding:7px 14px;font-size:.83rem;cursor:pointer}
+    #addSymbolBtn:hover, #addWatchBtn:hover{background:#ffa657}
+    #listTabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid #21262d}
+    .list-tab{background:none;border:none;border-bottom:2px solid transparent;color:#8b949e;padding:8px 4px 10px;margin-right:18px;font-size:.85rem;font-weight:600;cursor:pointer}
+    .list-tab.active{color:#f0883e;border-bottom-color:#f0883e}
+    .list-tab-hint{font-weight:400;font-size:.76rem;color:#6e7681}
+    .holding-remove, .watch-remove{background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;padding:1px 7px;cursor:pointer;font-size:.72rem}
+    .holding-remove:hover, .watch-remove:hover{border-color:#f85149;color:#f85149}
 
     #subscribeOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:center;justify-content:center}
     #subscribeOverlay.open{display:flex}
@@ -295,6 +299,43 @@
     .preset-btn{font-size:.75rem;padding:4px 11px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;cursor:pointer;white-space:nowrap;transition:.15s}
     .preset-btn:hover{border-color:#58a6ff;color:#58a6ff;background:#1c2333}
     .preset-btn.active{border-color:#58a6ff;background:#1f3a5f;color:#58a6ff}
+
+    /* ── Mobile ── */
+    @media (max-width: 768px) {
+      body{height:100dvh}
+      header{padding:8px 10px;gap:8px}
+      header h1{font-size:1rem}
+      header h1 svg{width:24px;height:18px}
+      .search-wrap{max-width:none;flex:1 1 100%;order:1}
+      .controls{flex:1 1 100%;order:2;gap:6px}
+      .controls select, .controls button{padding:5px 8px;font-size:.78rem}
+
+      .main{flex-direction:column;overflow-y:auto}
+      .chart-area{min-height:340px;flex:none}
+      #chartContainer{min-height:280px}
+      .sidebar{width:100%;border-left:none;border-top:1px solid #30363d;max-height:none;overflow-y:visible}
+
+      /* Modals go near-fullscreen so tables/forms have room to breathe */
+      #screenerModal, #arkModal, #trackModal, #myPortfolioModal{width:100%;max-width:100%;height:100dvh;max-height:100dvh;border-radius:0}
+      #screenerHead h2, #arkHead h2, #trackHead h2, #myPortfolioHead h2{font-size:.85rem}
+      #screenerControls{flex-direction:column;align-items:stretch}
+      #watchlistInput{min-width:0}
+
+      /* Data tables scroll horizontally instead of squeezing columns unreadable */
+      #screenerBody, #arkBody, #trackBody, #myPortfolioResults, #myWatchlistResults{overflow-x:auto}
+      .screen-table{font-size:.76rem}
+      .screen-table th, .screen-table td{padding:6px 8px;white-space:nowrap}
+      .screen-name{max-width:80px}
+
+      #loginForm, #subscribeForm{flex-direction:column}
+      #codeForm{flex-direction:column;align-items:stretch}
+      #codeInput{width:100%;text-align:center}
+      #addSymbolForm, #addWatchForm{flex-direction:column}
+      #addSymbolWrap, #addWatchWrap{max-width:none}
+      #subscribeModal{width:100%;max-width:92vw}
+      .list-tab-hint{display:none}
+      #trackStats{gap:14px}
+    }
   </style>
 </head>
 <body>
@@ -472,18 +513,41 @@
           <span id="loggedInAs"></span>
           <button id="logoutBtn">Log out</button>
         </div>
-        <form id="addSymbolForm">
-          <div id="addSymbolWrap">
-            <input id="addSymbolInput" placeholder="Company or symbol, e.g. Apple / AAPL" maxlength="40" autocomplete="off"/>
-            <div id="addSymbolSuggestions"></div>
+        <div id="listTabs">
+          <button type="button" class="list-tab active" id="portfolioTabBtn">📁 Portfolio <span class="list-tab-hint">— you hold these, alerts on BUY/SELL</span></button>
+          <button type="button" class="list-tab" id="watchlistTabBtn">👁 Watchlist <span class="list-tab-hint">— just watching, alerts on STRONG BUY only</span></button>
+        </div>
+
+        <div id="portfolioTabContent">
+          <form id="addSymbolForm">
+            <div id="addSymbolWrap">
+              <input id="addSymbolInput" placeholder="Company or symbol, e.g. Apple / AAPL" maxlength="40" autocomplete="off"/>
+              <div id="addSymbolSuggestions"></div>
+            </div>
+            <button type="submit" id="addSymbolBtn">+ Add</button>
+          </form>
+          <div id="myPortfolioStatus" style="color:#8b949e;font-size:.82rem"></div>
+          <div id="myPortfolioResults"></div>
+          <div id="myPortfolioCorrelation" style="display:none;margin-top:14px">
+            <h3 style="font-size:.78rem;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Diversification — pairwise return correlation</h3>
+            <div id="myPortfolioCorrSummary"></div>
           </div>
-          <button type="submit" id="addSymbolBtn">+ Add</button>
-        </form>
-        <div id="myPortfolioStatus" style="color:#8b949e;font-size:.82rem"></div>
-        <div id="myPortfolioResults"></div>
-        <div id="myPortfolioCorrelation" style="display:none;margin-top:14px">
-          <h3 style="font-size:.78rem;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Diversification — pairwise return correlation</h3>
-          <div id="myPortfolioCorrSummary"></div>
+        </div>
+
+        <div id="watchlistTabContent" style="display:none">
+          <form id="addWatchForm">
+            <div id="addWatchWrap">
+              <input id="addWatchInput" placeholder="Company or symbol, e.g. Apple / AAPL" maxlength="40" autocomplete="off"/>
+              <div id="addWatchSuggestions"></div>
+            </div>
+            <button type="submit" id="addWatchBtn">+ Add</button>
+          </form>
+          <div id="myWatchlistStatus" style="color:#8b949e;font-size:.82rem"></div>
+          <div id="myWatchlistResults"></div>
+          <div id="myWatchlistCorrelation" style="display:none;margin-top:14px">
+            <h3 style="font-size:.78rem;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Diversification — pairwise return correlation</h3>
+            <div id="myWatchlistCorrSummary"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1931,8 +1995,28 @@ function showMyPortfolioContent() {
   document.getElementById('loginBox').style.display = 'none';
   document.getElementById('myPortfolioContent').style.display = 'block';
   document.getElementById('loggedInAs').textContent = `Logged in as ${_currentUserEmail}`;
+  document.getElementById('portfolioTabBtn').classList.add('active');
+  document.getElementById('watchlistTabBtn').classList.remove('active');
+  document.getElementById('portfolioTabContent').style.display = 'block';
+  document.getElementById('watchlistTabContent').style.display = 'none';
   loadMyPortfolio();
 }
+
+document.getElementById('portfolioTabBtn').addEventListener('click', () => {
+  document.getElementById('portfolioTabBtn').classList.add('active');
+  document.getElementById('watchlistTabBtn').classList.remove('active');
+  document.getElementById('portfolioTabContent').style.display = 'block';
+  document.getElementById('watchlistTabContent').style.display = 'none';
+  loadMyPortfolio();
+});
+
+document.getElementById('watchlistTabBtn').addEventListener('click', () => {
+  document.getElementById('watchlistTabBtn').classList.add('active');
+  document.getElementById('portfolioTabBtn').classList.remove('active');
+  document.getElementById('watchlistTabContent').style.display = 'block';
+  document.getElementById('portfolioTabContent').style.display = 'none';
+  loadMyWatchlist();
+});
 
 async function loadMyPortfolio() {
   const status = document.getElementById('myPortfolioStatus');
@@ -2023,6 +2107,154 @@ function renderMyPortfolioCorrelation(avgCorr, highPairs) {
     html += `<div style="margin-top:10px">`;
     highPairs.forEach(p => {
       html += `<div class="corr-pair-warn">⚠ ${p.a} &amp; ${p.b} move together (correlation ${p.correlation.toFixed(2)}) — limited diversification benefit holding both.</div>`;
+    });
+    html += `</div>`;
+  }
+  summary.innerHTML = html;
+  corrBox.style.display = 'block';
+}
+
+// ── Watchlist add-symbol autocomplete (mirrors My Portfolio's) ──────────
+let _addWatchTimer;
+const addWatchInput = document.getElementById('addWatchInput');
+const addWatchSugg   = document.getElementById('addWatchSuggestions');
+
+addWatchInput.addEventListener('input', () => {
+  clearTimeout(_addWatchTimer);
+  const q = addWatchInput.value.trim();
+  if (q.length < 1) { addWatchSugg.style.display = 'none'; return; }
+  _addWatchTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const d = await r.json();
+      if (!d.length) { addWatchSugg.style.display = 'none'; return; }
+      addWatchSugg.innerHTML = d.map(x =>
+        `<div data-sym="${x.symbol}"><span class="sym">${x.symbol}</span>${x.name}</div>`
+      ).join('');
+      addWatchSugg.style.display = 'block';
+      addWatchSugg.querySelectorAll('div').forEach(el => {
+        el.addEventListener('click', () => {
+          addWatchInput.value = el.dataset.sym;
+          addWatchSugg.style.display = 'none';
+          addWatchInput.focus();
+        });
+      });
+    } catch (err) { /* search is a nicety -- fail quietly, user can still type a ticker directly */ }
+  }, 300);
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#addWatchWrap')) addWatchSugg.style.display = 'none';
+});
+
+document.getElementById('addWatchForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const input = document.getElementById('addWatchInput');
+  addWatchSugg.style.display = 'none';
+  const ticker = input.value.trim();
+  if (!ticker) return;
+  const status = document.getElementById('myWatchlistStatus');
+  status.textContent = 'Adding…';
+  try {
+    const res = await fetch('/api/my-watchlist/add', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ticker}),
+    });
+    const data = await res.json();
+    status.textContent = data.message || '';
+    if (data.ok) { input.value = ''; loadMyWatchlist(); }
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  }
+});
+
+async function loadMyWatchlist() {
+  const status = document.getElementById('myWatchlistStatus');
+  const results = document.getElementById('myWatchlistResults');
+  const corrBox = document.getElementById('myWatchlistCorrelation');
+  status.textContent = 'Loading…';
+  corrBox.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/my-watchlist');
+    if (res.status === 401) {
+      _currentUserEmail = null;
+      document.getElementById('loginBox').style.display = 'block';
+      document.getElementById('myPortfolioContent').style.display = 'none';
+      return;
+    }
+    const data = await res.json();
+    status.textContent = '';
+    renderMyWatchlistTable(data.holdings || []);
+    renderMyWatchlistCorrelation(data.avg_correlation || {}, data.high_correlation_pairs || []);
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  }
+}
+
+function renderMyWatchlistTable(holdings) {
+  const results = document.getElementById('myWatchlistResults');
+  if (!holdings.length) {
+    results.innerHTML = `<div style="color:#8b949e;text-align:center;padding:24px;font-size:.85rem">
+      No symbols yet — add one above. You will get an email when it hits a STRONG BUY rating (watchlist symbols are not held, so sell alerts do not apply).
+    </div>`;
+    return;
+  }
+  let html = `<table class="screen-table"><thead><tr>
+    <th>Symbol</th><th>Rating</th><th>Price</th><th>Change</th>
+    <th>Stage</th><th>RSI</th><th></th>
+  </tr></thead><tbody>`;
+  holdings.forEach(d => {
+    if (d.error) {
+      html += `<tr><td class="screen-sym" style="color:#f85149">${d.symbol}</td>
+        <td colspan="5" style="color:#8b949e;font-size:.76rem">⚠ ${d.error}</td>
+        <td><button class="watch-remove" data-sym="${d.symbol}">✕</button></td></tr>`;
+      return;
+    }
+    const chgColor  = d.change > 0 ? '#3fb950' : d.change < 0 ? '#f85149' : '#8b949e';
+    const rsiColor  = d.rsi <= 30 ? '#3fb950' : d.rsi >= 70 ? '#f85149' : d.rsi >= 50 ? '#58a6ff' : '#8b949e';
+    const stageIcon = {2:'↑',4:'↓',3:'⚠',1:'—'}[d.stage] || '—';
+    html += `<tr>
+      <td><div class="screen-sym">${d.symbol}</div>${d.name ? `<div class="screen-name">${d.name}</div>` : ''}</td>
+      <td><span class="screen-rating" style="color:${d.color};border-color:${d.color};background:${d.color}22">${d.rating}</span></td>
+      <td style="font-family:monospace;font-size:.83rem">${d.price.toFixed(2)}</td>
+      <td style="color:${chgColor};font-size:.83rem">${d.change>0?'+':''}${d.change.toFixed(2)}%</td>
+      <td style="color:${d.stage_color||'#8b949e'};font-size:.8rem">${stageIcon} ${d.stage}</td>
+      <td style="color:${rsiColor};font-size:.83rem">${d.rsi.toFixed(0)}</td>
+      <td><button class="watch-remove" data-sym="${d.symbol}">✕</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  results.innerHTML = html;
+
+  results.querySelectorAll('.watch-remove').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await fetch('/api/my-watchlist/remove', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ticker: btn.dataset.sym}),
+      });
+      loadMyWatchlist();
+    });
+  });
+}
+
+function renderMyWatchlistCorrelation(avgCorr, highPairs) {
+  const corrBox = document.getElementById('myWatchlistCorrelation');
+  const summary = document.getElementById('myWatchlistCorrSummary');
+  const syms = Object.keys(avgCorr);
+  if (!syms.length) { corrBox.style.display = 'none'; return; }
+
+  let html = `<div style="margin-bottom:8px;font-size:.78rem;color:#c9d1d9">Average correlation with the rest of your watchlist:</div>`;
+  syms.forEach(s => {
+    const v = avgCorr[s];
+    if (v == null) { html += `<span class="corr-pill">${s}: n/a</span>`; return; }
+    const color = v >= 0.7 ? '#f85149' : v >= 0.4 ? '#e3b341' : '#3fb950';
+    html += `<span class="corr-pill" style="color:${color};border-color:${color}44">${s}: ${v.toFixed(2)}</span>`;
+  });
+  if (highPairs.length) {
+    html += `<div style="margin-top:10px">`;
+    highPairs.forEach(p => {
+      html += `<div class="corr-pair-warn">⚠ ${p.a} &amp; ${p.b} move together (correlation ${p.correlation.toFixed(2)}) — limited diversification benefit watching both.</div>`;
     });
     html += `</div>`;
   }

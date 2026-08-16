@@ -1772,6 +1772,41 @@ def my_portfolio_remove():
     return jsonify({"ok": True})
 
 
+@app.route("/api/my-watchlist")
+def my_watchlist_view():
+    """Login-gated: a subscriber's own watchlist (research, not held) --
+    same rating computation as My Portfolio, scoped to user_watchlist.py.
+    Unlike Portfolio, these only ever trigger a STRONG BUY alert, never
+    SELL, since you can't sell what you don't hold."""
+    email = session.get("email")
+    if not email:
+        return jsonify({"error": "not_logged_in"}), 401
+    symbols = user_watchlist.get_watchlist(email)
+    result = _portfolio_view_for(symbols)
+    result["symbols"] = symbols
+    return jsonify(result)
+
+
+@app.route("/api/my-watchlist/add", methods=["POST"])
+def my_watchlist_add():
+    email = session.get("email")
+    if not email:
+        return jsonify({"error": "not_logged_in"}), 401
+    ticker = (request.json or {}).get("ticker", "") if request.is_json else request.form.get("ticker", "")
+    ok, message = user_watchlist.add_watch(email, ticker)
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+
+
+@app.route("/api/my-watchlist/remove", methods=["POST"])
+def my_watchlist_remove():
+    email = session.get("email")
+    if not email:
+        return jsonify({"error": "not_logged_in"}), 401
+    ticker = (request.json or {}).get("ticker", "") if request.is_json else request.form.get("ticker", "")
+    user_watchlist.remove_watch(email, ticker)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/ark-trades")
 def ark_trades_route():
     """Cathie Wood / ARK Invest's inferred daily trades for ARKK. ARK
@@ -1928,17 +1963,21 @@ def auth_me():
     return jsonify({"email": session.get("email")})
 
 
-import alerts         # noqa: E402  (imports analyze_symbol from this module)
-import subscribers    # noqa: E402
-import ark_tracker    # noqa: E402
-import track_record   # noqa: E402
-import auth           # noqa: E402
-import user_holdings  # noqa: E402
+import alerts          # noqa: E402  (imports analyze_symbol from this module)
+import subscribers     # noqa: E402
+import ark_tracker     # noqa: E402
+import track_record    # noqa: E402
+import auth            # noqa: E402
+import user_holdings   # noqa: E402
+import user_watchlist  # noqa: E402
+import symbol_state    # noqa: E402
 subscribers.init_db()
 ark_tracker.init_db()
 track_record.init_db()
 auth.init_db()
 user_holdings.init_db()
+user_watchlist.init_db()
+symbol_state.init_db()
 alerts.start_scheduler()
 
 

@@ -50,6 +50,23 @@ def get_holdings(email):
             return [r[0] for r in cur.fetchall()]
 
 
+def get_all_holdings_by_symbol():
+    """Returns {ticker: [email, email, ...]} across every subscriber --
+    the reverse index alerts.py needs to fan out personalized BUY/SELL
+    alerts without rating the same symbol once per subscriber who holds
+    it."""
+    if not DATABASE_URL:
+        return {}
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT ticker, email FROM user_holdings")
+            rows = cur.fetchall()
+    result = {}
+    for ticker, email in rows:
+        result.setdefault(ticker, []).append(email)
+    return result
+
+
 def add_holding(email, ticker):
     ticker = (ticker or "").strip().upper()
     if not DATABASE_URL or not ticker or len(ticker) > 12:

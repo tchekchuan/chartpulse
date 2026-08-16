@@ -1,12 +1,18 @@
 # ============================================================
 # File: alerts.py
-# Date: 2026-08-13
+# Date: 2026-08-13 (subscriber My Portfolio/My Watchlist alerts added 2026-08-16)
 # Task: Background job (runs inside the Render web process) that
 #       twice daily checks the watchlist/portfolio and pushes a
 #       Telegram alert for STRONG BUY ratings (any symbol) and for
 #       BUY/SELL zone changes on held positions. Replaces the local
 #       Task-Scheduler-based portfolio_alert.py for the cloud app,
 #       since that job only fires when the PC is on.
+#
+#       Same cycle also personally alerts subscribers: any symbol in
+#       their own My Portfolio (user_holdings.py) fires on a new
+#       BUY/SELL zone change; any symbol in My Watchlist
+#       (user_watchlist.py) fires only on a new STRONG BUY, mirroring
+#       how Shawn's own PORTFOLIO/WATCHLIST lists already behave.
 # ============================================================
 
 import json
@@ -20,6 +26,10 @@ import requests
 
 from mailer import send_email as _mailer_send_email
 import track_record
+import symbol_state
+import user_holdings
+import user_watchlist
+import subscribers
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
@@ -82,6 +92,15 @@ def send_email(subject, body):
     return _mailer_send_email(ALERT_EMAIL_TO, subject, body)
 
 
+def _format_line(sym, r, tag, held_tag=""):
+    return (
+        f"*{sym}*{held_tag}: {tag} — {r['rating']}\n"
+        f"  Price {r['price']:.2f} {r['currency']} ({r['change']:+.2f}%)  "
+        f"RSI {r['rsi']:.0f}  Stage {r['stage']}\n"
+        f"  {r['reason']}"
+    )
+
+
 def check_and_alert():
     """Runs one full check cycle. Safe to call manually for testing."""
     from app import analyze_symbol   # deferred: avoids import-order issues with app.py
@@ -91,53 +110,123 @@ def check_and_alert():
     lines            = []   # everything -- goes to Shawn only (Telegram + his email)
     strong_buy_lines = []   # STRONG BUY only -- also goes to public subscribers
 
-    all_symbols = list(dict.fromkeys(PORTFOLIO + WATCHLIST))  # dedup, keep order
+    # Subscriber reverse indexes: {symbol: [email, ...]}. Fetched up front so
+    # every symbol -- fixed watchlist AND anything subscribers added to their
+    # own My Portfolio / My Watchlist -- gets rated exactly once this cycle,
+    # even if several subscribers (or Shawn's own list) reference the same
+    # symbol.
+    try:
+        portfolio_by_symbol = user_holdings.get_all_holdings_by_symbol()
+    except Exception as e:
+        print(f"alerts: user_holdings lookup failed: {e}")
+        portfolio_by_symbol = {}
+    try:
+        watchlist_by_symbol = user_watchlist.get_all_watchlist_by_symbol()
+    except Exception as e:
+        print(f"alerts: user_watchlist lookup failed: {e}")
+        watchlist_by_symbol = {}
+
+    all_symbols = list(dict.fromkeys(
+        PORTFOLIO + WATCHLIST + list(portfolio_by_symbol) + list(watchlist_by_symbol)
+    ))
+
+    rated = {}          # {symbol: r} -- shared across the fixed-list and subscriber logic below
+    prior_symbol_state = symbol_state.get_all()
+    new_symbol_state    = {}
+
     for sym in all_symbols:
         r = analyze_symbol(sym, period="1y")
         if "error" in r:
             new_state[sym] = prev_state.get(sym, {})
             continue
+        rated[sym] = r
 
         rating = r["rating"]
         action = _action_for(rating)
-        held   = sym in PORTFOLIO
-        prev   = prev_state.get(sym, {})
+        new_symbol_state[sym] = {"rating": rating, "action": action}
 
-        new_state[sym] = {
-            "rating": rating, "action": action,
-            "last_checked": datetime.now(SGT).isoformat(timespec="seconds"),
-        }
+        # ── Fixed watchlist/portfolio (Shawn's own, unchanged logic) ──
+        if sym in PORTFOLIO or sym in WATCHLIST:
+            held = sym in PORTFOLIO
+            prev = prev_state.get(sym, {})
 
-        is_new_strong_buy = rating == "STRONG BUY" and prev.get("rating") != "STRONG BUY"
-        is_held_change    = held and action in ("BUY", "SELL") and prev.get("action") != action
+            new_state[sym] = {
+                "rating": rating, "action": action,
+                "last_checked": datetime.now(SGT).isoformat(timespec="seconds"),
+            }
 
-        if is_new_strong_buy or is_held_change:
-            tag = "⭐ STRONG BUY" if rating == "STRONG BUY" else f"{action} zone"
-            held_tag = " (held)" if held else ""
-            line = (
-                f"*{sym}*{held_tag}: {tag} — {rating}\n"
-                f"  Price {r['price']:.2f} {r['currency']} ({r['change']:+.2f}%)  "
-                f"RSI {r['rsi']:.0f}  Stage {r['stage']}\n"
-                f"  {r['reason']}"
-            )
-            lines.append(line)
-            if is_new_strong_buy:
-                strong_buy_lines.append(line)
+            is_new_strong_buy = rating == "STRONG BUY" and prev.get("rating") != "STRONG BUY"
+            is_held_change    = held and action in ("BUY", "SELL") and prev.get("action") != action
 
-            # Backtest tracking: log the same moment a signal becomes
-            # alert-worthy on the buy side (STRONG BUY anywhere, or a new
-            # BUY zone on a held position) -- scoped to buy-side only for
-            # now, sell-zone changes are exit timing, a separate question.
-            if is_new_strong_buy or (is_held_change and action == "BUY"):
-                try:
-                    track_record.log_signal(
-                        sym, rating, r.get("score"),
-                        r.get("entry"), r.get("stop"), r.get("target"),
-                    )
-                except Exception as e:
-                    print(f"alerts: track_record.log_signal failed for {sym}: {e}")
+            if is_new_strong_buy or is_held_change:
+                tag = "⭐ STRONG BUY" if rating == "STRONG BUY" else f"{action} zone"
+                held_tag = " (held)" if held else ""
+                line = _format_line(sym, r, tag, held_tag)
+                lines.append(line)
+                if is_new_strong_buy:
+                    strong_buy_lines.append(line)
+
+                # Backtest tracking: log the same moment a signal becomes
+                # alert-worthy on the buy side (STRONG BUY anywhere, or a new
+                # BUY zone on a held position) -- scoped to buy-side only for
+                # now, sell-zone changes are exit timing, a separate question.
+                if is_new_strong_buy or (is_held_change and action == "BUY"):
+                    try:
+                        track_record.log_signal(
+                            sym, rating, r.get("score"),
+                            r.get("entry"), r.get("stop"), r.get("target"),
+                        )
+                    except Exception as e:
+                        print(f"alerts: track_record.log_signal failed for {sym}: {e}")
 
     _save_state(new_state)
+
+    # ── Subscriber My Portfolio / My Watchlist alerts ─────────────────────
+    # Portfolio symbols: alert on any new BUY/SELL zone change (you hold it).
+    # Watchlist symbols: alert only on a new STRONG BUY (you don't hold it,
+    # so a SELL signal isn't actionable the same way).
+    per_subscriber_lines = {}   # {email: [line, ...]}
+
+    def _add_line(email, line):
+        per_subscriber_lines.setdefault(email, []).append(line)
+
+    for sym, r in rated.items():
+        prior  = prior_symbol_state.get(sym, {})
+        rating = r["rating"]
+        action = _action_for(rating)
+
+        if sym in portfolio_by_symbol and action in ("BUY", "SELL") and prior.get("action") != action:
+            line = _format_line(sym, r, f"{action} zone (your portfolio)")
+            for email in portfolio_by_symbol[sym]:
+                _add_line(email, line)
+
+        if sym in watchlist_by_symbol and rating == "STRONG BUY" and prior.get("rating") != "STRONG BUY":
+            line = _format_line(sym, r, "⭐ STRONG BUY (your watchlist)")
+            for email in watchlist_by_symbol[sym]:
+                _add_line(email, line)
+
+    try:
+        symbol_state.set_many(new_symbol_state)
+    except Exception as e:
+        print(f"alerts: symbol_state.set_many failed: {e}")
+
+    if per_subscriber_lines:
+        try:
+            token_by_email = {e: t for e, t in subscribers.get_confirmed_subscribers()}
+            sent = 0
+            for email, sub_lines in per_subscriber_lines.items():
+                token = token_by_email.get(email)
+                if not token:
+                    continue  # not (or no longer) a confirmed subscriber
+                unsub_url = f"{subscribers.SITE_URL}/api/subscribe/unsubscribe?token={token}"
+                plain = "getChartPulse: your portfolio/watchlist update\n\n" + "\n\n".join(
+                    l.replace("*", "") for l in sub_lines
+                ) + f"\n\n---\nManage your lists: {subscribers.SITE_URL} (log in with this email)\nUnsubscribe: {unsub_url}"
+                if _mailer_send_email(email, f"getChartPulse: {len(sub_lines)} update(s) on your lists", plain):
+                    sent += 1
+            print(f"alerts: sent personalized portfolio/watchlist alerts to {sent} subscriber(s)")
+        except Exception as e:
+            print(f"alerts: subscriber portfolio/watchlist notify failed: {e}")
 
     if lines:
         now = datetime.now(SGT).strftime("%Y-%m-%d %H:%M SGT")
@@ -153,7 +242,6 @@ def check_and_alert():
 
     if strong_buy_lines:
         try:
-            import subscribers
             now = datetime.now(SGT).strftime("%Y-%m-%d %H:%M SGT")
             public_plain = f"getChartPulse — {now}\n\n" + "\n\n".join(
                 l.replace("*", "") for l in strong_buy_lines
