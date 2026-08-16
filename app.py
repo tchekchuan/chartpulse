@@ -1398,6 +1398,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
 @app.route("/api/stock")
 def get_stock():
     symbol   = request.args.get("symbol", "AAPL").upper()
