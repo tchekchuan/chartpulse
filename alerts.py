@@ -92,7 +92,7 @@ def check_and_alert():
 
     all_symbols = list(dict.fromkeys(PORTFOLIO + WATCHLIST))  # dedup, keep order
     for sym in all_symbols:
-        r = analyze_symbol(sym)
+        r = analyze_symbol(sym, period="1y")
         if "error" in r:
             new_state[sym] = prev_state.get(sym, {})
             continue

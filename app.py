@@ -1051,6 +1051,14 @@ def news_sentiment(articles):
 #              + Warren Buffett (fundamentals) + News sentiment
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Symbols Shawn's own watchlist notes (ivy/analyst/watchlist.json) explicitly
+# describe as sentiment/momentum plays with no real fundamental case ("trades
+# almost entirely on news flow, not fundamentals" / "treat as a technical
+# trade, not a buy-and-hold"). Folding a Buffett-style value score into the
+# same composite used for quality names like BABA/MT would be inconsistent
+# with how these are actually meant to be traded.
+SENTIMENT_DRIVEN_SYMBOLS = {"BBAI", "DJT"}
+
 def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patterns):
     """
     Produces a professional analyst rating (Strong Buy → Strong Sell),
@@ -1113,7 +1121,9 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
 
     # ── Warren Buffett: Fundamentals ─────────────────────────────────────────
     val_score = (fundamentals or {}).get("value_score", 0)
-    if val_score >= 4:
+    if sym in SENTIMENT_DRIVEN_SYMBOLS:
+        reasons.append("Fundamentals: N/A — sentiment/momentum play, trade technicals only")
+    elif val_score >= 4:
         score += 2
         vr = ", ".join((fundamentals or {}).get("value_reasons", []))
         reasons.append(f"Fundamentals: Buffett-grade quality (score {val_score}/5) — {vr}")
@@ -1186,7 +1196,9 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
         verdict_parts.append(f"News sentiment is {sentiment['label'].lower()} — negative headlines create headwinds; tighten stops.")
 
     # Fundamental summary
-    if val_score >= 4:
+    if sym in SENTIMENT_DRIVEN_SYMBOLS:
+        verdict_parts.append("This is a sentiment/momentum name, not a fundamentals play — treat purely as a technical trade with strict risk management.")
+    elif val_score >= 4:
         verdict_parts.append(f"Fundamentally this is a Buffett-quality business ({val_score}/5 value score) — suitable for longer-term holds.")
     elif val_score <= 1 and fundamentals:
         verdict_parts.append("Fundamentals are weak — treat this as a purely technical trade with strict risk management.")
@@ -1332,7 +1344,7 @@ def index():
 @app.route("/api/stock")
 def get_stock():
     symbol   = request.args.get("symbol", "AAPL").upper()
-    period   = request.args.get("period",   "3mo")
+    period   = request.args.get("period",   "1y")
     interval = request.args.get("interval", "1d")
 
     try:
@@ -1441,11 +1453,15 @@ def get_stock():
         return jsonify({"error": str(e), "detail": traceback.format_exc()}), 500
 
 
-def analyze_symbol(sym, period="3mo", interval="1d"):
+def analyze_symbol(sym, period="1y", interval="1d"):
     """
     Full single-symbol analysis pipeline: fetches data via yfinance,
     computes all technical/fundamental signals, and returns a condensed
     analyst rating dict.
+
+    Default period is 1y, not 3mo -- SMA200/Stage Analysis needs ~200
+    daily bars; a shorter period silently returns stage=0 "N/A", which
+    used to disable the model's own primary trend filter by default.
 
     Standalone (no Flask request context needed) so it can be reused by
     the /api/screen route AND by external scripts — e.g. the scheduled
@@ -1551,7 +1567,7 @@ def screen_stocks():
     Workers capped at 3 to stay under Yahoo Finance rate limits.
     """
     symbols_raw = request.args.get("symbols", "")
-    period      = request.args.get("period",   "3mo")
+    period      = request.args.get("period",   "1y")
     interval    = request.args.get("interval", "1d")
 
     symbols = [s.strip().upper()
