@@ -22,17 +22,13 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
-
 from mailer import send_email as _mailer_send_email
+from telegram_notify import send_telegram
 import track_record
 import symbol_state
 import user_holdings
 import user_watchlist
 import subscribers
-
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 
 ALERT_EMAIL_TO     = os.environ.get("ALERT_EMAIL_TO")
 
@@ -67,22 +63,6 @@ def _load_state():
 
 def _save_state(state):
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
-
-
-def send_telegram(text):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("alerts: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set, skipping send")
-        return False
-    try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        )
-        return r.status_code == 200
-    except Exception as e:
-        print(f"alerts: Telegram send failed: {e}")
-        return False
 
 
 def send_email(subject, body):

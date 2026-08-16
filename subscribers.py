@@ -13,6 +13,7 @@ import secrets
 import psycopg2
 
 from mailer import send_email as _send_email
+from telegram_notify import send_telegram
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -106,6 +107,7 @@ def confirm(token):
             f"Not financial advice -- always do your own research.\n\n"
             f"---\nUnsubscribe anytime: {unsub_url}",
         )
+        send_telegram(f"🎉 *New getChartPulse subscriber*\n{email}")
     return email
 
 
@@ -150,6 +152,7 @@ def confirm_email(email):
         f"Not financial advice -- always do your own research.\n\n"
         f"---\nUnsubscribe anytime: {unsub_url}",
     )
+    send_telegram(f"🎉 *New getChartPulse subscriber* (via login)\n{email}")
     return True
 
 
