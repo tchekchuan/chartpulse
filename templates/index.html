@@ -2279,6 +2279,20 @@ checkLoginState().then(() => {
   }
 });
 
+// On narrow (phone-width) screens, the chart's own price-scale labels for
+// every enabled overlay (Pivot, Fractal S/R, Volume Profile, Period H/L,
+// Round Nums, Buy/Sell Zones -- ~30+ price lines combined) collide and
+// crush the candles into a sliver, since lightweight-charts always
+// reserves label width on its own canvas regardless of container size.
+// Default off the two heaviest categories (Volume Profile and Fractal
+// S/R, ~20 of those lines combined) so the chart is readable out of the
+// box on a phone -- every toggle stays available, nothing is removed,
+// this only changes the starting state below ~480px wide.
+if (window.innerWidth <= 480) {
+  document.getElementById('chkVP').checked = false;
+  document.getElementById('chkFractal').checked = false;
+}
+
 // Initial load
 loadStock();
 </script>
