@@ -790,7 +790,14 @@ function applyVisibility() {
     signal:  document.getElementById('chkSignals').checked,
   };
   lineRegistry.forEach(({line, group, origColor}) => {
-    line.applyOptions({ color: show[group] ? origColor : 'rgba(0,0,0,0)' });
+    // Transparent color alone only hides the line stroke -- the price-scale
+    // axis label (title) stays put regardless, so a toggled-off category
+    // still visually cluttered the chart with its labels. axisLabelVisible
+    // has to be turned off too for a toggle to actually remove it.
+    line.applyOptions({
+      color: show[group] ? origColor : 'rgba(0,0,0,0)',
+      axisLabelVisible: show[group],
+    });
   });
   volumeSeries.applyOptions({ visible: document.getElementById('chkVolume').checked });
   Object.entries(maSeries).forEach(([name, s]) => {
