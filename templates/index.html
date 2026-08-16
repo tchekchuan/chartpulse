@@ -331,10 +331,10 @@
     </select>
     <button id="loadBtn">Load</button>
     <button id="screenerBtn">🔍 Screener</button>
-    <button id="portfolioBtn">📁 Portfolio</button>
+    <button id="portfolioBtn" title="The site owner's own holdings — public reference, not personalized to you">📁 Shawn's Portfolio</button>
     <button id="arkBtn">🐋 ARK Trades</button>
     <button id="trackBtn">📈 Track Record</button>
-    <button id="myPortfolioBtn">👤 My Portfolio</button>
+    <button id="myPortfolioBtn" title="Your own portfolio — log in with your subscriber email">👤 My Portfolio</button>
     <button id="subscribeBtn">🔔 Subscribe</button>
   </div>
 </header>
@@ -414,8 +414,11 @@
 <div id="portfolioOverlay">
   <div id="portfolioModal">
     <div id="portfolioHead">
-      <h2>📁 Portfolio — Ratings, Position Sizing &amp; Correlation</h2>
+      <h2>📁 Shawn's Portfolio — Ratings, Position Sizing &amp; Correlation</h2>
       <button id="portfolioClose">✕ Close</button>
+    </div>
+    <div id="portfolioSubtitle" style="padding:8px 18px;font-size:.74rem;color:#8b949e;border-bottom:1px solid #21262d">
+      This is the site owner's own holdings, shown as a public reference — not personalized to you. For your own symbols, use 👤 My Portfolio.
     </div>
     <div id="portfolioBody">
       <div id="portfolioStatus">Loading holdings…</div>
