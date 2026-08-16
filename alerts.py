@@ -19,6 +19,7 @@ from pathlib import Path
 import requests
 
 from mailer import send_email as _mailer_send_email
+import track_record
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
@@ -123,6 +124,19 @@ def check_and_alert():
             if is_new_strong_buy:
                 strong_buy_lines.append(line)
 
+            # Backtest tracking: log the same moment a signal becomes
+            # alert-worthy on the buy side (STRONG BUY anywhere, or a new
+            # BUY zone on a held position) -- scoped to buy-side only for
+            # now, sell-zone changes are exit timing, a separate question.
+            if is_new_strong_buy or (is_held_change and action == "BUY"):
+                try:
+                    track_record.log_signal(
+                        sym, rating, r.get("score"),
+                        r.get("entry"), r.get("stop"), r.get("target"),
+                    )
+                except Exception as e:
+                    print(f"alerts: track_record.log_signal failed for {sym}: {e}")
+
     _save_state(new_state)
 
     if lines:
@@ -148,6 +162,13 @@ def check_and_alert():
             print(f"alerts: sent STRONG BUY email to {sent} subscriber(s)")
         except Exception as e:
             print(f"alerts: subscriber notify failed: {e}")
+
+    try:
+        n = track_record.resolve_pending()
+        if n:
+            print(f"alerts: resolved {n} pending track_record signal(s)")
+    except Exception as e:
+        print(f"alerts: track_record.resolve_pending failed: {e}")
 
 
 def _seconds_until_next_check():

@@ -227,6 +227,24 @@
     #arkStatus{padding:14px 18px;color:#8b949e;font-size:.84rem}
     .ark-action{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
 
+    /* Track Record modal */
+    #trackBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
+    #trackBtn:hover{border-color:#4ade80;color:#4ade80}
+    #trackOverlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:none;align-items:center;justify-content:center}
+    #trackModal{background:#161b22;border:1px solid #30363d;border-radius:10px;width:96%;max-width:960px;height:87vh;display:flex;flex-direction:column;overflow:hidden}
+    #trackHead{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid #30363d;flex-shrink:0}
+    #trackHead h2{font-size:.95rem;font-weight:700;color:#4ade80}
+    #trackClose{background:none;border:1px solid #30363d;border-radius:5px;color:#8b949e;padding:3px 9px;cursor:pointer;font-size:.85rem}
+    #trackClose:hover{border-color:#f85149;color:#f85149}
+    #trackMethodology{padding:8px 18px;font-size:.72rem;color:#8b949e;border-bottom:1px solid #21262d;line-height:1.5}
+    #trackBody{flex:1;overflow-y:auto;padding:0}
+    #trackStatus{padding:14px 18px;color:#8b949e;font-size:.84rem}
+    #trackStats{padding:16px 18px;display:flex;gap:24px;flex-wrap:wrap;border-bottom:1px solid #21262d}
+    .track-stat{text-align:center}
+    .track-stat-val{font-size:1.6rem;font-weight:800}
+    .track-stat-lbl{font-size:.68rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em}
+    .track-outcome{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
+
     #subscribeOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:center;justify-content:center}
     #subscribeOverlay.open{display:flex}
     #subscribeModal{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:24px;width:360px;max-width:90vw}
@@ -285,6 +303,7 @@
     <button id="screenerBtn">🔍 Screener</button>
     <button id="portfolioBtn">📁 Portfolio</button>
     <button id="arkBtn">🐋 ARK Trades</button>
+    <button id="trackBtn">📈 Track Record</button>
     <button id="subscribeBtn">🔔 Subscribe</button>
   </div>
 </header>
@@ -391,6 +410,24 @@
     <div id="arkBody">
       <div id="arkStatus">Loading…</div>
       <div id="arkResults"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Track Record Modal -->
+<div id="trackOverlay">
+  <div id="trackModal">
+    <div id="trackHead">
+      <h2>📈 Track Record — Does This Tool's Signal Actually Work?</h2>
+      <button id="trackClose">✕ Close</button>
+    </div>
+    <div id="trackMethodology">
+      A signal is logged the moment a symbol newly reaches STRONG BUY (any symbol) or newly crosses into a BUY zone on a held portfolio position — the same instant a real alert fires. Outcome: <strong>WIN</strong> if price hits the target before the stop; <strong>LOSS</strong> if the stop is hit first; <strong>EXPIRED</strong> after 30 days if neither is hit, classified by whether price finished above or below entry. Forward-looking only — no historical backfill, no cherry-picking. Not financial advice.
+    </div>
+    <div id="trackBody">
+      <div id="trackStatus">Loading…</div>
+      <div id="trackStats" style="display:none"></div>
+      <div id="trackResults"></div>
     </div>
   </div>
 </div>
@@ -1694,6 +1731,104 @@ function renderArkTrades(data) {
     row.addEventListener('click', () => {
       document.getElementById('symbolInput').value = row.dataset.sym;
       closeArk();
+      loadStock();
+    });
+  });
+}
+
+// ── Track Record modal ───────────────────────────────────────────────────
+let _trackLoaded = false;
+
+function openTrackRecord() {
+  document.getElementById('trackOverlay').style.display = 'flex';
+  if (!_trackLoaded) loadTrackRecord();
+}
+function closeTrackRecord() { document.getElementById('trackOverlay').style.display = 'none'; }
+
+document.getElementById('trackBtn').addEventListener('click', openTrackRecord);
+document.getElementById('trackClose').addEventListener('click', closeTrackRecord);
+document.getElementById('trackOverlay').addEventListener('click', e => {
+  if (e.target.id === 'trackOverlay') closeTrackRecord();
+});
+
+async function loadTrackRecord() {
+  const status = document.getElementById('trackStatus');
+  const stats  = document.getElementById('trackStats');
+  const results = document.getElementById('trackResults');
+  status.style.display = 'block';
+  status.textContent = 'Loading…';
+  stats.style.display = 'none';
+  results.innerHTML = '';
+
+  try {
+    const res  = await fetch('/api/track-record');
+    const data = await res.json();
+    _trackLoaded = true;
+    status.style.display = 'none';
+    renderTrackRecord(data);
+  } catch (err) {
+    status.style.display = 'block';
+    status.textContent = `Error: ${err.message}`;
+  }
+}
+
+function renderTrackRecord(data) {
+  const stats   = document.getElementById('trackStats');
+  const results = document.getElementById('trackResults');
+
+  if (!data.total) {
+    stats.style.display = 'none';
+    results.innerHTML = `<div style="color:#8b949e;text-align:center;padding:30px;font-size:.85rem">
+      No signals logged yet — this track record started ${new Date().toISOString().slice(0,10)} and grows
+      forward from here as new STRONG BUY / BUY-zone signals fire on the watchlist and portfolio.
+      Check back after the next scheduled check (8am / 9pm SGT).
+    </div>`;
+    return;
+  }
+
+  const winColor = data.win_rate == null ? '#8b949e' : data.win_rate >= 50 ? '#3fb950' : '#f85149';
+  let statsHtml = `
+    <div class="track-stat"><div class="track-stat-val" style="color:${winColor}">${data.win_rate != null ? data.win_rate.toFixed(1)+'%' : '—'}</div><div class="track-stat-lbl">Win Rate</div></div>
+    <div class="track-stat"><div class="track-stat-val">${data.resolved}</div><div class="track-stat-lbl">Resolved</div></div>
+    <div class="track-stat"><div class="track-stat-val" style="color:#e3b341">${data.pending}</div><div class="track-stat-lbl">Pending</div></div>
+    <div class="track-stat"><div class="track-stat-val">${data.total}</div><div class="track-stat-lbl">Total Signals</div></div>
+  `;
+  ['STRONG BUY','BUY'].forEach(rating => {
+    const b = data.by_rating[rating];
+    if (b && b.resolved) {
+      const c = b.win_rate >= 50 ? '#3fb950' : '#f85149';
+      statsHtml += `<div class="track-stat"><div class="track-stat-val" style="color:${c};font-size:1.1rem">${b.win_rate.toFixed(1)}%</div><div class="track-stat-lbl">${rating} (${b.resolved})</div></div>`;
+    }
+  });
+  stats.innerHTML = statsHtml;
+  stats.style.display = 'flex';
+
+  const outcomeColors = {'WIN':'#3fb950','EXPIRED_WIN':'#86efac','LOSS':'#f85149','EXPIRED_LOSS':'#dc2626','PENDING':'#e3b341'};
+  let html = `<table class="screen-table"><thead><tr>
+    <th>Symbol</th><th>Signal Date</th><th>Rating</th><th>Entry</th><th>Stop</th><th>Target</th>
+    <th>Outcome</th><th>Return</th>
+  </tr></thead><tbody>`;
+  data.recent.forEach(r => {
+    const oc = outcomeColors[r.outcome] || '#8b949e';
+    const retColor = (r.return_pct||0) > 0 ? '#3fb950' : (r.return_pct||0) < 0 ? '#f85149' : '#8b949e';
+    html += `<tr class="screen-row" data-sym="${r.symbol}">
+      <td class="screen-sym">${r.symbol}</td>
+      <td style="font-size:.8rem">${r.signal_date}</td>
+      <td style="font-size:.78rem">${r.rating}</td>
+      <td style="font-family:monospace;font-size:.8rem">${r.entry_price != null ? r.entry_price.toFixed(2) : '—'}</td>
+      <td style="font-family:monospace;font-size:.8rem;color:#f85149">${r.stop_price != null ? r.stop_price.toFixed(2) : '—'}</td>
+      <td style="font-family:monospace;font-size:.8rem;color:#3fb950">${r.target_price != null ? r.target_price.toFixed(2) : '—'}</td>
+      <td><span class="track-outcome" style="color:${oc};border-color:${oc};background:${oc}22">${r.outcome}</span></td>
+      <td style="font-family:monospace;font-size:.8rem;color:${retColor}">${r.return_pct != null ? (r.return_pct>0?'+':'')+r.return_pct.toFixed(1)+'%' : '—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  results.innerHTML = html;
+
+  results.querySelectorAll('.screen-row').forEach(row => {
+    row.addEventListener('click', () => {
+      document.getElementById('symbolInput').value = row.dataset.sym;
+      closeTrackRecord();
       loadStock();
     });
   });

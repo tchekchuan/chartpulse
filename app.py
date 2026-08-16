@@ -1727,6 +1727,17 @@ def ark_trades_route():
     })
 
 
+@app.route("/api/track-record")
+def track_record_route():
+    """getChartPulse's own backtested track record. alerts.py logs a
+    signal the moment a symbol newly reaches STRONG BUY or newly crosses
+    into a BUY zone on a held position -- the same instant a real alert
+    fires -- then resolves it based on whether price hit the target
+    before the stop. Forward-looking only, no historical backfill, so
+    this genuinely grows from whenever it was first deployed."""
+    return jsonify(track_record.get_track_record())
+
+
 @app.route("/api/search")
 def search_ticker():
     q = request.args.get("q", "")
@@ -1808,8 +1819,10 @@ def subscribe_unsubscribe_route():
 import alerts        # noqa: E402  (imports analyze_symbol from this module)
 import subscribers   # noqa: E402
 import ark_tracker   # noqa: E402
+import track_record  # noqa: E402
 subscribers.init_db()
 ark_tracker.init_db()
+track_record.init_db()
 alerts.start_scheduler()
 
 
