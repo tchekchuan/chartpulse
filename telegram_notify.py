@@ -25,6 +25,13 @@ def send_telegram(text):
             json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
             timeout=10,
         )
+        if r.status_code != 200:
+            # Telegram rejects the whole message on things like unbalanced
+            # Markdown entities (e.g. a stray "_" or "*") -- that used to
+            # fail completely silently here, since only network-level
+            # exceptions were logged below. Now the actual API error is
+            # visible in Render logs instead of just "nothing arrived".
+            print(f"telegram_notify: Telegram API returned {r.status_code}: {r.text[:300]}")
         return r.status_code == 200
     except Exception as e:
         print(f"telegram_notify: Telegram send failed: {e}")
