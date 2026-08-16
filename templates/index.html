@@ -576,6 +576,7 @@
       <span class="price" id="pPrice">—</span>
       <span id="pChange">—</span>
       <span id="pATR" style="font-size:.8rem;color:#8b949e"></span>
+      <span id="pAsOf" style="font-size:.72rem;color:#6b7280" title="Not real-time — for informational and educational purposes only, do your own research before trading"></span>
       <span id="pStage" style="display:none"></span>
     </div>
     <div id="chartContainer" style="flex:1;min-height:0"></div>
@@ -1344,6 +1345,15 @@ function updatePriceBar(meta, stage) {
   document.getElementById('pSym').textContent   = meta.symbol;
   document.getElementById('pPrice').textContent = `${meta.currency} ${meta.price.toFixed(2)}`;
   document.getElementById('pATR').textContent   = `ATR: ${meta.atr.toFixed(2)}`;
+
+  const asOf = document.getElementById('pAsOf');
+  if (meta.priced_at) {
+    const d = new Date(meta.priced_at * 1000);
+    asOf.textContent = `As of ${d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})} — delayed, not real-time`;
+  } else {
+    asOf.textContent = '';
+  }
+
   const chg  = meta.price - meta.prev_close;
   const pct  = (chg / meta.prev_close * 100);
   const sign = chg >= 0 ? '+' : '';

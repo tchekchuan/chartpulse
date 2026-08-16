@@ -1466,13 +1466,36 @@ def get_stock():
         patterns = candlestick_patterns(df, atr_val)
         signals  = trade_signals(df, pp, fractals, vp, mas, rounds, periods, momentum, stage)
 
-        info = ticker.fast_info
+        # Price meta — fall back to the historical bar (df) if fast_info is
+        # missing, NaN, or otherwise unreliable. fast_info.last_price is a
+        # live quote that intermittently comes back None/NaN from Yahoo
+        # (rate limiting, pre/post-market gaps, etc.); using it unchecked
+        # risks either a crash (round(None)) or a nonsensical price shown
+        # as if it were real. analyze_symbol() already had this same
+        # fallback for alerts/screener — this route (the one users actually
+        # look at) needs the same protection, not less.
+        last_close      = round(float(df["Close"].iloc[-1]), 4)
+        last_prev_close = round(float(df["Close"].iloc[-2]), 4) if len(df) >= 2 else last_close
+        try:
+            info = ticker.fast_info
+            lp = info.last_price
+            pc = info.previous_close
+            price      = round(float(lp), 4) if lp and not np.isnan(float(lp)) else last_close
+            prev_close = round(float(pc), 4) if pc and not np.isnan(float(pc)) else last_prev_close
+            currency   = getattr(info, "currency", "USD") or "USD"
+        except Exception:
+            price, prev_close, currency = last_close, last_prev_close, "USD"
+
         meta = {
             "symbol":     symbol,
-            "price":      round(float(info.last_price), 4),
-            "prev_close": round(float(info.previous_close), 4),
-            "currency":   getattr(info, "currency", "USD"),
+            "price":      price,
+            "prev_close": prev_close,
+            "currency":   currency,
             "atr":        round(atr_val, 4),
+            # Unix seconds of the most recent bar actually shown on the
+            # chart -- ground truth for "as of" in the UI, independent of
+            # whether the live fast_info quote above was usable or not.
+            "priced_at":  candles[-1]["time"] if candles else None,
         }
 
         try:
