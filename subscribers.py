@@ -85,7 +85,19 @@ def confirm(token):
             cur.execute("UPDATE subscribers SET confirmed = TRUE WHERE token = %s RETURNING email", (token,))
             row = cur.fetchone()
         conn.commit()
-    return row[0] if row else None
+    if not row:
+        return None
+    email = row[0]
+    unsub_url = f"{SITE_URL}/api/subscribe/unsubscribe?token={token}"
+    _send_email(
+        email,
+        "You're subscribed to getChartPulse alerts",
+        f"Thanks for subscribing! You'll get an email whenever a symbol on getChartPulse's "
+        f"watchlist hits a STRONG BUY rating.\n\n"
+        f"Not financial advice -- always do your own research.\n\n"
+        f"---\nUnsubscribe anytime: {unsub_url}",
+    )
+    return email
 
 
 def unsubscribe(token):
