@@ -262,8 +262,13 @@
     #logoutBtn{background:none;border:1px solid #30363d;border-radius:5px;color:#8b949e;padding:3px 9px;cursor:pointer;font-size:.76rem}
     #logoutBtn:hover{border-color:#f85149;color:#f85149}
     #addSymbolForm{display:flex;gap:8px;margin-bottom:14px}
-    #addSymbolInput{flex:1;max-width:200px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:7px 10px;font-size:.85rem;outline:none;text-transform:uppercase}
+    #addSymbolWrap{position:relative;flex:1;max-width:280px}
+    #addSymbolInput{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:7px 10px;font-size:.85rem;outline:none}
     #addSymbolInput:focus{border-color:#f0883e}
+    #addSymbolSuggestions{position:absolute;top:100%;left:0;right:0;background:#161b22;border:1px solid #30363d;border-radius:0 0 6px 6px;z-index:200;display:none;max-height:220px;overflow-y:auto}
+    #addSymbolSuggestions div{padding:7px 12px;cursor:pointer;font-size:.85rem}
+    #addSymbolSuggestions div:hover{background:#1f2937}
+    #addSymbolSuggestions .sym{font-weight:700;color:#f0883e;margin-right:6px}
     #addSymbolBtn{background:#f0883e;border:none;border-radius:6px;color:#0d1117;font-weight:700;padding:7px 14px;font-size:.83rem;cursor:pointer}
     #addSymbolBtn:hover{background:#ffa657}
     .holding-remove{background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;padding:1px 7px;cursor:pointer;font-size:.72rem}
@@ -468,7 +473,10 @@
           <button id="logoutBtn">Log out</button>
         </div>
         <form id="addSymbolForm">
-          <input id="addSymbolInput" placeholder="Add symbol e.g. AAPL" maxlength="12"/>
+          <div id="addSymbolWrap">
+            <input id="addSymbolInput" placeholder="Company or symbol, e.g. Apple / AAPL" maxlength="40" autocomplete="off"/>
+            <div id="addSymbolSuggestions"></div>
+          </div>
           <button type="submit" id="addSymbolBtn">+ Add</button>
         </form>
         <div id="myPortfolioStatus" style="color:#8b949e;font-size:.82rem"></div>
@@ -1865,9 +1873,43 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   document.getElementById('myPortfolioContent').style.display = 'none';
 });
 
+// ── Add-symbol autocomplete (search by company name or ticker) ──────────
+let _addSymTimer;
+const addSymInput = document.getElementById('addSymbolInput');
+const addSymSugg   = document.getElementById('addSymbolSuggestions');
+
+addSymInput.addEventListener('input', () => {
+  clearTimeout(_addSymTimer);
+  const q = addSymInput.value.trim();
+  if (q.length < 1) { addSymSugg.style.display = 'none'; return; }
+  _addSymTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const d = await r.json();
+      if (!d.length) { addSymSugg.style.display = 'none'; return; }
+      addSymSugg.innerHTML = d.map(x =>
+        `<div data-sym="${x.symbol}"><span class="sym">${x.symbol}</span>${x.name}</div>`
+      ).join('');
+      addSymSugg.style.display = 'block';
+      addSymSugg.querySelectorAll('div').forEach(el => {
+        el.addEventListener('click', () => {
+          addSymInput.value = el.dataset.sym;
+          addSymSugg.style.display = 'none';
+          addSymInput.focus();
+        });
+      });
+    } catch (err) { /* search is a nicety -- fail quietly, user can still type a ticker directly */ }
+  }, 300);
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#addSymbolWrap')) addSymSugg.style.display = 'none';
+});
+
 document.getElementById('addSymbolForm').addEventListener('submit', async e => {
   e.preventDefault();
   const input = document.getElementById('addSymbolInput');
+  addSymSugg.style.display = 'none';
   const ticker = input.value.trim();
   if (!ticker) return;
   const status = document.getElementById('myPortfolioStatus');
