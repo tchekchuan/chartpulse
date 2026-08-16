@@ -1889,6 +1889,22 @@ def auth_verify():
     return redirect("/?logged_in=1")
 
 
+@app.route("/api/auth/verify-code", methods=["POST"])
+@limiter.limit("10 per hour")
+def auth_verify_code():
+    """Same login as /api/auth/verify but via the 6-digit code instead of
+    clicking the link -- lets someone read the email on one device and
+    log in on a different one (e.g. request on a laptop, read the code
+    off their phone, type it into the laptop)."""
+    data = request.json or {} if request.is_json else request.form
+    email = auth.verify_login_code(data.get("email", ""), data.get("code", ""))
+    if not email:
+        return jsonify({"ok": False, "message": "Invalid or expired code."}), 400
+    session["email"] = email
+    session.permanent = True
+    return jsonify({"ok": True})
+
+
 @app.route("/api/auth/logout", methods=["POST"])
 def auth_logout():
     session.pop("email", None)

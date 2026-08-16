@@ -46,6 +46,11 @@ def init_db():
                     created_at TIMESTAMPTZ DEFAULT now()
                 )
             """)
+            # code: a short number typed in by hand instead of clicking the
+            # link -- lets someone read the email on one device (e.g. their
+            # phone) and log in on another (e.g. their laptop) without
+            # needing to open/click the link on that second device.
+            cur.execute("ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS code TEXT")
         conn.commit()
     print("auth: table ready")
 
@@ -66,12 +71,13 @@ def request_login_link(email):
         return GENERIC_MSG  # not a confirmed subscriber -- silently no-op
 
     token = secrets.token_urlsafe(32)
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=LOGIN_TOKEN_TTL_MINUTES)
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO login_tokens (token, email, expires_at) VALUES (%s, %s, %s)",
-                (token, email, expires_at),
+                "INSERT INTO login_tokens (token, email, code, expires_at) VALUES (%s, %s, %s, %s)",
+                (token, email, code, expires_at),
             )
         conn.commit()
 
@@ -79,6 +85,7 @@ def request_login_link(email):
     _send_email(
         email, "Your getChartPulse login link",
         f"Click to log in (expires in {LOGIN_TOKEN_TTL_MINUTES} minutes):\n\n{login_url}\n\n"
+        f"On a different device? Enter this code instead: {code}\n\n"
         f"If you didn't request this, ignore this email.",
     )
     return GENERIC_MSG
@@ -108,5 +115,36 @@ def verify_login_token(token):
             if expires_at < datetime.now(timezone.utc):
                 return None
             cur.execute("UPDATE login_tokens SET used = TRUE WHERE token = %s", (token,))
+        conn.commit()
+    return email
+
+
+def verify_login_code(email, code):
+    """Verifies a typed-in 6-digit code for the given email. Same
+    non-single-use-within-TTL semantics as verify_login_token -- lets
+    someone read the code on one device and type it into another.
+    Rate-limited at the route level (not here) against brute-forcing the
+    6-digit space."""
+    email = (email or "").strip().lower()
+    code = (code or "").strip()
+    if not DATABASE_URL or not email or not code:
+        return None
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT expires_at FROM login_tokens WHERE email = %s AND code = %s "
+                "ORDER BY created_at DESC LIMIT 1",
+                (email, code),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            expires_at = row[0]
+            if expires_at < datetime.now(timezone.utc):
+                return None
+            cur.execute(
+                "UPDATE login_tokens SET used = TRUE WHERE email = %s AND code = %s",
+                (email, code),
+            )
         conn.commit()
     return email

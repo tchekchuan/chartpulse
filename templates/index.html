@@ -263,6 +263,12 @@
     #loginSubmit{background:#f0883e;border:none;border-radius:6px;color:#0d1117;font-weight:700;padding:8px 14px;font-size:.85rem;cursor:pointer;white-space:nowrap}
     #loginSubmit:hover{background:#ffa657}
     #loginStatus{margin-top:12px;font-size:.82rem;color:#8b949e}
+    #codeBox p{color:#8b949e;font-size:.8rem;margin-bottom:10px;line-height:1.5;text-align:left}
+    #codeForm{display:flex;gap:8px;justify-content:center}
+    #codeInput{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:8px 11px;font-size:.95rem;outline:none}
+    #codeInput:focus{border-color:#f0883e}
+    #codeSubmit{background:#f0883e;border:none;border-radius:6px;color:#0d1117;font-weight:700;padding:8px 14px;font-size:.85rem;cursor:pointer;white-space:nowrap}
+    #codeSubmit:hover{background:#ffa657}
     #myPortfolioTop{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px}
     #loggedInAs{font-size:.78rem;color:#8b949e}
     #logoutBtn{background:none;border:1px solid #30363d;border-radius:5px;color:#8b949e;padding:3px 9px;cursor:pointer;font-size:.76rem}
@@ -481,6 +487,14 @@
           <button type="submit" id="loginSubmit">Send Link</button>
         </form>
         <div id="loginStatus"></div>
+        <div id="codeBox" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid #21262d">
+          <p style="margin-bottom:10px">Logging in on a different device than where you read the email? Enter the 6-digit code from the same email instead of clicking the link:</p>
+          <form id="codeForm">
+            <input type="text" id="codeInput" placeholder="123456" inputmode="numeric" maxlength="6" autocomplete="one-time-code" style="max-width:120px;text-align:center;letter-spacing:.2em;font-family:monospace"/>
+            <button type="submit" id="codeSubmit">Log In</button>
+          </form>
+          <div id="codeStatus" style="margin-top:8px;font-size:.82rem;color:#8b949e"></div>
+        </div>
       </div>
       <div id="myPortfolioContent" style="display:none">
         <div id="myPortfolioTop">
@@ -1932,6 +1946,8 @@ document.getElementById('myPortfolioOverlay').addEventListener('click', e => {
   if (e.target.id === 'myPortfolioOverlay') closeMyPortfolio();
 });
 
+let _pendingLoginEmail = null;
+
 document.getElementById('loginForm').addEventListener('submit', async e => {
   e.preventDefault();
   const email = document.getElementById('loginEmail').value.trim();
@@ -1946,6 +1962,38 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
     });
     const data = await res.json();
     status.textContent = data.message;
+    _pendingLoginEmail = email;
+    document.getElementById('codeBox').style.display = 'block';
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('codeForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const code = document.getElementById('codeInput').value.trim();
+  const btn = document.getElementById('codeSubmit');
+  const status = document.getElementById('codeStatus');
+  if (!_pendingLoginEmail) {
+    status.textContent = 'Enter your email above and send a code first.';
+    return;
+  }
+  btn.disabled = true;
+  status.textContent = 'Checking…';
+  try {
+    const res = await fetch('/api/auth/verify-code', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: _pendingLoginEmail, code}),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      _currentUserEmail = _pendingLoginEmail;
+      showMyPortfolioContent();
+    } else {
+      status.textContent = data.message || 'Invalid or expired code.';
+    }
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   } finally {
