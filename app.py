@@ -1633,6 +1633,19 @@ def get_stock():
         analyst   = analyst_rating(meta, stage, momentum, signals,
                                    fundamentals, sentiment, patterns)
 
+        # AI Analyst: an independent Claude-generated verdict shown alongside
+        # the rule-based one above, for comparison. Gated to logged-in
+        # subscribers (on top of ai_analyst's own daily cache + cap) since
+        # this is a real per-call cost on a public site, unlike everything
+        # else on this page.
+        ai_verdict = None
+        if session.get("email"):
+            try:
+                ai_verdict = ai_analyst.get_ai_verdict(
+                    symbol, meta, stage, momentum, fundamentals, sentiment, patterns, signals)
+            except Exception as e:
+                app.logger.warning(f"get_stock: ai_analyst failed for {symbol}: {type(e).__name__}: {e}")
+
         return jsonify({
             "meta":            meta,
             "candles":         candles,
@@ -1652,6 +1665,7 @@ def get_stock():
             "sentiment":       sentiment,
             "context":         context,
             "analyst":         analyst,
+            "ai_analyst":      ai_verdict,
         })
 
     except Exception as e:
@@ -2119,6 +2133,7 @@ import auth            # noqa: E402
 import user_holdings   # noqa: E402
 import user_watchlist  # noqa: E402
 import symbol_state    # noqa: E402
+import ai_analyst      # noqa: E402
 subscribers.init_db()
 ark_tracker.init_db()
 track_record.init_db()
@@ -2126,6 +2141,7 @@ auth.init_db()
 user_holdings.init_db()
 user_watchlist.init_db()
 symbol_state.init_db()
+ai_analyst.init_db()
 alerts.start_scheduler()
 
 

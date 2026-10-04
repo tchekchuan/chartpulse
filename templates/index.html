@@ -605,8 +605,17 @@
 
     <!-- Analyst Rating -->
     <div class="panel" id="analystPanel">
-      <h3>Analyst Rating <span class="badge" id="analystBadge">—</span></h3>
+      <h3>Composite Analyst <span class="badge" id="analystBadge">—</span></h3>
       <div id="analystContent"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
+    </div>
+
+    <!-- AI Analyst — independent Claude-generated verdict, for comparison
+         against the rule-based Composite Analyst above. Hidden entirely
+         for logged-out visitors (gated server-side too, in /api/stock). -->
+    <div class="panel" id="aiAnalystPanel" style="display:none">
+      <h3>AI Analyst <span class="badge" id="aiAnalystBadge">—</span></h3>
+      <div style="font-size:.65rem;color:#8b949e;margin-top:-6px;margin-bottom:4px">Claude &middot; cached, updates daily</div>
+      <div id="aiAnalystContent"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
     </div>
 
     <!-- Trade Signals -->
@@ -1086,6 +1095,41 @@ function renderAnalyst(analyst, sentiment) {
   el.innerHTML = html;
 }
 
+function renderAIAnalyst(aiAnalyst) {
+  const panel = document.getElementById('aiAnalystPanel');
+  const el    = document.getElementById('aiAnalystContent');
+  const badge = document.getElementById('aiAnalystBadge');
+
+  // Logged-out visitors never get ai_analyst back from the API at all —
+  // keep the panel hidden rather than showing an empty/broken card.
+  if (!_currentUserEmail) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = '';
+
+  if (!aiAnalyst) {
+    badge.textContent = '—';
+    el.innerHTML = `<div style="color:#8b949e;font-size:.8rem">Not available right now — today's AI analysis limit may be reached, or this symbol hasn't been analyzed yet today.</div>`;
+    return;
+  }
+
+  const c     = aiAnalyst.color;
+  const score = aiAnalyst.score;
+  const stars = Math.max(1, Math.min(5, Math.round((score + 10) / 4)));
+
+  badge.textContent = aiAnalyst.rating;
+  badge.style.color = c;
+  badge.style.borderColor = c;
+  badge.style.background  = c + '22';
+
+  el.innerHTML = `<div class="analyst-rating">
+      <div class="analyst-big" style="color:${c}">${aiAnalyst.rating}</div>
+      <div class="analyst-score">AI score: ${score > 0 ? '+' : ''}${score}/10 &nbsp;·&nbsp; ${starsHtml(stars, c)}</div>
+    </div>
+    <div class="analyst-verdict">"${aiAnalyst.verdict}"</div>`;
+}
+
 function renderContext(bullets, stage) {
   const el    = document.getElementById('ctxLevels');
   const badge = document.getElementById('ctxBadge');
@@ -1434,6 +1478,7 @@ async function loadStock() {
 
     // Render sidebars
     renderAnalyst(data.analyst, data.sentiment);
+    renderAIAnalyst(data.ai_analyst);
     renderSignals(data.signals);
     renderContext(data.context || [], data.stage);
     renderNews(data.news || [], data.sentiment);
@@ -2284,6 +2329,11 @@ checkLoginState().then(() => {
     history.replaceState(null, '', location.pathname);  // clean up the URL
     openMyPortfolio();
   }
+  // AI Analyst panel's visibility depends on _currentUserEmail, so the
+  // very first loadStock() must wait for this to resolve -- otherwise a
+  // logged-in visitor's first symbol load would render with the panel
+  // incorrectly hidden (fixed on their next search, but wrong on load).
+  loadStock();
 });
 
 // On narrow (phone-width) screens, the chart's own price-scale labels for
@@ -2299,9 +2349,6 @@ if (window.innerWidth <= 480) {
   document.getElementById('chkVP').checked = false;
   document.getElementById('chkFractal').checked = false;
 }
-
-// Initial load
-loadStock();
 </script>
 </body>
 </html>
