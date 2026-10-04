@@ -1842,7 +1842,7 @@ def _portfolio_view_for(symbols, include_ai=False):
 
     holdings = []
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(analyze_symbol, s, "1y", include_ai): s for s in symbols}
+        futures = {pool.submit(analyze_symbol, s, "1y", include_raw=include_ai): s for s in symbols}
         for fut in as_completed(futures):
             holdings.append(fut.result())
     holdings.sort(key=lambda x: x.get("score", -99), reverse=True)
