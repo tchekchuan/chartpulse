@@ -1312,59 +1312,137 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  14. NEWS  (yfinance built-in — no extra API key required)
+#  14. NEWS  (Finnhub for US symbols, yfinance fallback)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_news(ticker_obj):
+_NEWS_CACHE = {}             # symbol -> (expires_at, articles)
+_NEWS_TTL_OK   = 15 * 60     # news refreshes often, but not per page view
+_NEWS_TTL_FAIL = 5 * 60      # nothing found / blocked: retry sooner
+
+
+def _clean_article(title, publisher, link, pub_ts, summary):
+    """
+    Normalises one article and HTML-escapes its text fields -- the front
+    end inserts them via innerHTML, and Finnhub summaries can carry markup.
+    Non-http(s) links are dropped so they can't become javascript: URLs.
+    """
+    import html
+    link = link or ""
+    if not link.startswith(("http://", "https://")):
+        link = ""
+    return {
+        "title":     html.escape((title or "")[:130]),
+        "publisher": html.escape(publisher or ""),
+        "link":      html.escape(link, quote=True),
+        "time":      int(pub_ts or 0),
+        "summary":   html.escape((summary or "")[:200]),
+    }
+
+
+def _fetch_finnhub_news(sym):
+    """
+    Last 7 days of company news from Finnhub's free /company-news endpoint.
+    Used instead of yfinance's ticker.news, which comes back empty from this
+    app's cloud hosting IP (same Yahoo blocking as ticker.info above).
+    Free tier covers North American companies only -- callers skip symbols
+    with an exchange suffix.
+    """
+    import datetime
+    today = datetime.date.today()
+    r = requests.get(
+        "https://finnhub.io/api/v1/company-news",
+        params={"symbol": sym,
+                "from": (today - datetime.timedelta(days=7)).isoformat(),
+                "to":   today.isoformat(),
+                "token": FINNHUB_API_KEY},
+        timeout=8,
+    )
+    r.raise_for_status()
+    raw = r.json()
+    if not isinstance(raw, list):
+        return []
+    raw.sort(key=lambda a: a.get("datetime") or 0, reverse=True)
+    articles = []
+    for a in raw[:10]:
+        if a.get("headline"):
+            articles.append(_clean_article(a.get("headline"), a.get("source"),
+                                           a.get("url"), a.get("datetime"),
+                                           a.get("summary")))
+    return articles
+
+
+def _fetch_yfinance_news(ticker_obj):
     """
     Fetches recent news articles for the ticker via yfinance.
     Handles both old (flat dict) and new (nested 'content') yfinance formats.
-    Returns up to 8 articles with title, publisher, link, and timestamp.
     """
-    try:
-        raw = ticker_obj.news
-        if not raw:
-            return []
-        articles = []
-        for item in raw[:10]:
-            # yfinance ≥0.2.50 wraps fields in a "content" sub-dict
-            src = item.get("content", item)
-
-            title     = src.get("title") or item.get("title", "")
-            publisher = (src.get("provider", {}).get("displayName")
-                         or src.get("publisher")
-                         or item.get("publisher", ""))
-            summary   = (src.get("summary") or item.get("summary", ""))[:200]
-
-            # Link resolution (varies by yfinance version)
-            link = (src.get("canonicalUrl", {}).get("url")
-                    or src.get("clickThroughUrl", {}).get("url")
-                    or src.get("link")
-                    or item.get("link", ""))
-
-            # Timestamp (unix seconds)
-            pub_ts = item.get("providerPublishTime", 0)
-            if not pub_ts:
-                try:
-                    import datetime
-                    raw_dt = src.get("pubDate", "")
-                    if raw_dt:
-                        dt = datetime.datetime.fromisoformat(raw_dt.replace("Z", "+00:00"))
-                        pub_ts = int(dt.timestamp())
-                except Exception:
-                    pub_ts = 0
-
-            if title:
-                articles.append({
-                    "title":     title[:130],
-                    "publisher": publisher,
-                    "link":      link,
-                    "time":      pub_ts,
-                    "summary":   summary,
-                })
-        return articles[:8]
-    except Exception:
+    raw = ticker_obj.news
+    if not raw:
         return []
+    articles = []
+    for item in raw[:10]:
+        # yfinance ≥0.2.50 wraps fields in a "content" sub-dict
+        src = item.get("content", item)
+
+        title     = src.get("title") or item.get("title", "")
+        publisher = (src.get("provider", {}).get("displayName")
+                     or src.get("publisher")
+                     or item.get("publisher", ""))
+        summary   = src.get("summary") or item.get("summary", "")
+
+        # Link resolution (varies by yfinance version)
+        link = ((src.get("canonicalUrl") or {}).get("url")
+                or (src.get("clickThroughUrl") or {}).get("url")
+                or src.get("link")
+                or item.get("link", ""))
+
+        # Timestamp (unix seconds)
+        pub_ts = item.get("providerPublishTime", 0)
+        if not pub_ts:
+            try:
+                import datetime
+                raw_dt = src.get("pubDate", "")
+                if raw_dt:
+                    dt = datetime.datetime.fromisoformat(raw_dt.replace("Z", "+00:00"))
+                    pub_ts = int(dt.timestamp())
+            except Exception:
+                pub_ts = 0
+
+        if title:
+            articles.append(_clean_article(title, publisher, link, pub_ts, summary))
+    return articles
+
+
+def get_news(ticker_obj):
+    """
+    Returns up to 8 recent articles with title, publisher, link, timestamp
+    and summary. Finnhub first for US symbols, yfinance as fallback.
+    Cached per symbol so the screener doesn't burn Finnhub's 60 req/min.
+    """
+    sym = getattr(ticker_obj, "ticker", None)
+    now = time.time()
+    if sym and sym in _NEWS_CACHE:
+        expires_at, cached = _NEWS_CACHE[sym]
+        if now < expires_at:
+            return cached
+
+    articles = []
+    if FINNHUB_API_KEY and sym and "." not in sym:   # "." = exchange suffix Finnhub free tier doesn't cover
+        try:
+            articles = _fetch_finnhub_news(sym)
+        except Exception as e:
+            app.logger.warning(f"get_news: Finnhub failed for {sym}: {type(e).__name__}: {e}")
+
+    if not articles:
+        try:
+            articles = _fetch_yfinance_news(ticker_obj)
+        except Exception as e:
+            app.logger.warning(f"get_news: yfinance failed for {sym}: {type(e).__name__}: {e}")
+
+    articles = articles[:8]
+    if sym:
+        _NEWS_CACHE[sym] = (now + (_NEWS_TTL_OK if articles else _NEWS_TTL_FAIL), articles)
+    return articles
 
 
 # ══════════════════════════════════════════════════════════════════════════════

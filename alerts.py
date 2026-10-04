@@ -38,7 +38,7 @@ SGT = timezone(timedelta(hours=8))
 # Portfolio = actually held (alert on any BUY/SELL zone change).
 # Watchlist = research only (alert only on STRONG BUY).
 # Mirrors ivy/analyst/watchlist.json as of 2026-08-13 — update here if holdings change.
-PORTFOLIO = ["BBAI", "DJT", "1810.HK", "MT", "CAST.ST", "WOLF", "BABA"]
+PORTFOLIO = ["BBAI", "DJT", "1810.HK", "MT", "WOLF", "BABA"]   # CAST.ST removed 2026-10-04: not held
 WATCHLIST = ["JOBY", "ACHR", "NOW", "AAPL", "GOOGL", "META"]
 
 CHECK_TIMES_SGT = [(8, 0), (21, 0)]   # 8am and 9pm SGT, matching the old local job
@@ -128,7 +128,10 @@ def check_and_alert():
         # ── Fixed watchlist/portfolio (Shawn's own, unchanged logic) ──
         if sym in PORTFOLIO or sym in WATCHLIST:
             held = sym in PORTFOLIO
-            prev = prev_state.get(sym, {})
+            # alert_state.json is wiped on every redeploy; fall back to the
+            # Postgres-backed symbol_state so a redeploy doesn't re-fire
+            # alerts for zones Shawn was already told about.
+            prev = prev_state.get(sym) or prior_symbol_state.get(sym, {})
 
             new_state[sym] = {
                 "rating": rating, "action": action,
