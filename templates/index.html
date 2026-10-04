@@ -592,12 +592,12 @@
     <div class="panel">
       <h3>Visibility</h3>
       <div class="toggle-grid">
-        <label class="toggle-row"><input type="checkbox" id="chkPivot"   checked> Pivot Points</label>
-        <label class="toggle-row"><input type="checkbox" id="chkFractal" checked> Fractal S/R</label>
-        <label class="toggle-row"><input type="checkbox" id="chkVP"      checked> Vol Profile</label>
+        <label class="toggle-row"><input type="checkbox" id="chkPivot"> Pivot Points</label>
+        <label class="toggle-row"><input type="checkbox" id="chkFractal"> Fractal S/R</label>
+        <label class="toggle-row"><input type="checkbox" id="chkVP"> Vol Profile</label>
         <label class="toggle-row"><input type="checkbox" id="chkMA"      checked> Moving Avgs</label>
-        <label class="toggle-row"><input type="checkbox" id="chkRound"   checked> Round Nums</label>
-        <label class="toggle-row"><input type="checkbox" id="chkPeriod"  checked> Period H/L</label>
+        <label class="toggle-row"><input type="checkbox" id="chkRound"> Round Nums</label>
+        <label class="toggle-row"><input type="checkbox" id="chkPeriod"> Period H/L</label>
         <label class="toggle-row"><input type="checkbox" id="chkVolume"  checked> Volume Bars</label>
         <label class="toggle-row"><input type="checkbox" id="chkSignals" checked> Buy/Sell Zones</label>
       </div>
@@ -2336,19 +2336,6 @@ checkLoginState().then(() => {
   loadStock();
 });
 
-// On narrow (phone-width) screens, the chart's own price-scale labels for
-// every enabled overlay (Pivot, Fractal S/R, Volume Profile, Period H/L,
-// Round Nums, Buy/Sell Zones -- ~30+ price lines combined) collide and
-// crush the candles into a sliver, since lightweight-charts always
-// reserves label width on its own canvas regardless of container size.
-// Default off the two heaviest categories (Volume Profile and Fractal
-// S/R, ~20 of those lines combined) so the chart is readable out of the
-// box on a phone -- every toggle stays available, nothing is removed,
-// this only changes the starting state below ~480px wide.
-if (window.innerWidth <= 480) {
-  document.getElementById('chkVP').checked = false;
-  document.getElementById('chkFractal').checked = false;
-}
 </script>
 </body>
 </html>
