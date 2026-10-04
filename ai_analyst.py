@@ -129,18 +129,28 @@ def _save(symbol, rating, score, verdict):
         conn.commit()
 
 
-def get_ai_verdict(symbol, meta, stage, momentum, fundamentals, sentiment, patterns, signals):
+def get_ai_verdict(symbol, meta, stage, momentum, fundamentals, sentiment, patterns, signals,
+                    allow_fresh=True):
     """Returns an independent Claude-generated verdict for `symbol`, cached once per
     calendar day. Returns None if the feature isn't configured, the daily cap is
     reached, or the API call fails/refuses -- callers must treat None as "no AI
     panel this time", never as an error to surface, since the rule-based Composite
-    Analyst already covers the page without it."""
+    Analyst already covers the page without it.
+
+    allow_fresh=False (My Portfolio/Watchlist, which rate several symbols in one
+    request) returns only an already-cached-today result and never makes a live
+    call -- rating N symbols synchronously in one HTTP request risks exceeding
+    gunicorn's worker timeout (hit exactly this in testing, worker SIGKILLed).
+    The single-stock page keeps the default True, its only call per request."""
     if not _client or not DATABASE_URL:
         return None
 
     cached = _get_cached(symbol)
     if cached:
         return cached
+
+    if not allow_fresh:
+        return None
 
     if _count_today() >= DAILY_CAP:
         return None

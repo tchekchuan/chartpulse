@@ -1855,7 +1855,8 @@ def _portfolio_view_for(symbols, include_ai=False):
             try:
                 verdict = ai_analyst.get_ai_verdict(
                     h["symbol"], raw["meta"], raw["stage"], raw["momentum"],
-                    raw["fundamentals"], raw["sentiment"], raw["patterns"], raw["signals"])
+                    raw["fundamentals"], raw["sentiment"], raw["patterns"], raw["signals"],
+                    allow_fresh=False)
             except Exception as e:
                 app.logger.warning(f"_portfolio_view_for: ai_analyst failed for {h['symbol']}: {type(e).__name__}: {e}")
                 verdict = None
