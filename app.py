@@ -1673,11 +1673,26 @@ def get_stock():
         return jsonify({"error": str(e), "detail": traceback.format_exc()}), 500
 
 
+# In-memory cache for analyze_symbol(), keyed by (symbol, period, interval).
+# {key: (computed_at_epoch_seconds, result_dict_including_raw)}. Daily-bar
+# technical indicators (stage, RSI, MACD, the rating itself) don't change
+# within a trading day regardless of this cache -- the only fields that can
+# lag are live price/change/news, by at most _ANALYZE_CACHE_TTL. Mainly
+# benefits My Portfolio/Watchlist (10 symbols re-analyzed on every open) and
+# repeat Screener searches; the twice-daily portfolio_alert.py job runs
+# hours apart, well outside this window, so it's unaffected either way.
+# Plain dict, not lock-protected: _portfolio_view_for's ThreadPoolExecutor
+# means concurrent access is possible, but the only race is a harmless
+# redundant recompute on a simultaneous cache miss, never a correctness bug.
+_analyze_cache = {}
+_ANALYZE_CACHE_TTL = 150  # seconds
+
+
 def analyze_symbol(sym, period="1y", interval="1d", include_raw=False):
     """
     Full single-symbol analysis pipeline: fetches data via yfinance,
     computes all technical/fundamental signals, and returns a condensed
-    analyst rating dict.
+    analyst rating dict. Cached for _ANALYZE_CACHE_TTL seconds (see above).
 
     Default period is 1y, not 3mo -- SMA200/Stage Analysis needs ~200
     daily bars; a shorter period silently returns stage=0 "N/A", which
@@ -1690,6 +1705,19 @@ def analyze_symbol(sym, period="1y", interval="1d", include_raw=False):
     Newer yfinance (≥0.2.51) uses curl_cffi internally — do NOT pass a
     custom requests.Session.
     """
+    cache_key = (sym, period, interval)
+    cached = _analyze_cache.get(cache_key)
+    if cached and (time.time() - cached[0]) < _ANALYZE_CACHE_TTL:
+        result = cached[1]
+        return result if include_raw else {k: v for k, v in result.items() if k != "_raw"}
+
+    result = _analyze_symbol_uncached(sym, period, interval)
+    if "error" not in result:
+        _analyze_cache[cache_key] = (time.time(), result)
+    return result if include_raw else {k: v for k, v in result.items() if k != "_raw"}
+
+
+def _analyze_symbol_uncached(sym, period, interval):
     try:
         ticker = yf.Ticker(sym)
         df     = ticker.history(period=period, interval=interval,
@@ -1776,20 +1804,18 @@ def analyze_symbol(sym, period="1y", interval="1d", include_raw=False):
                             else "#e3b341"),
             "verdict":     (arating.get("verdict", "") or "")[:200],
         }
-        if include_raw:
-            # Reuses this function's own already-fetched data for the AI
-            # Analyst step and the portfolio correlation matrix (My
-            # Portfolio/Watchlist) instead of re-fetching from yfinance a
-            # second time per symbol -- not included by default since the
-            # public Screener and background alert jobs also call this
-            # function and have no use for it.
-            date_col = "Datetime" if "Datetime" in df.columns else "Date"
-            closes = pd.Series(df["Close"].values, index=pd.to_datetime(df[date_col]).dt.normalize())
-            result["_raw"] = {
-                "meta": meta, "stage": stg, "momentum": mom, "fundamentals": fundamentals,
-                "sentiment": sentiment, "patterns": pats, "signals": sigs,
-                "returns": closes.pct_change().dropna(),
-            }
+        # Always attached (cheap -- no extra fetch, just referencing data
+        # already computed above) since analyze_symbol()'s cache wrapper
+        # needs it available regardless of which caller first populates a
+        # given cache entry; stripped back out there for callers that
+        # didn't ask for it (include_raw=False).
+        date_col = "Datetime" if "Datetime" in df.columns else "Date"
+        closes = pd.Series(df["Close"].values, index=pd.to_datetime(df[date_col]).dt.normalize())
+        result["_raw"] = {
+            "meta": meta, "stage": stg, "momentum": mom, "fundamentals": fundamentals,
+            "sentiment": sentiment, "patterns": pats, "signals": sigs,
+            "returns": closes.pct_change().dropna(),
+        }
         return result
     except Exception as exc:
         return {"symbol": sym, "error": f"{type(exc).__name__}: {str(exc)[:100]}"}
