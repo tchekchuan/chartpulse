@@ -2113,13 +2113,13 @@ function renderMyPortfolioTable(holdings) {
     return;
   }
   let html = `<table class="screen-table"><thead><tr>
-    <th>Symbol</th><th>Rating</th><th>Price</th><th>Change</th>
+    <th>Symbol</th><th>Rating</th><th>AI</th><th>Price</th><th>Change</th>
     <th>Stage</th><th>RSI</th><th>Suggested Size</th><th></th>
   </tr></thead><tbody>`;
   holdings.forEach(d => {
     if (d.error) {
       html += `<tr><td class="screen-sym" style="color:#f85149">${d.symbol}</td>
-        <td colspan="6" style="color:#8b949e;font-size:.76rem">⚠ ${d.error}</td>
+        <td colspan="7" style="color:#8b949e;font-size:.76rem">⚠ ${d.error}</td>
         <td><button class="holding-remove" data-sym="${d.symbol}">✕</button></td></tr>`;
       return;
     }
@@ -2127,9 +2127,13 @@ function renderMyPortfolioTable(holdings) {
     const rsiColor  = d.rsi <= 30 ? '#3fb950' : d.rsi >= 70 ? '#f85149' : d.rsi >= 50 ? '#58a6ff' : '#8b949e';
     const stageIcon = {2:'↑',4:'↓',3:'⚠',1:'—'}[d.stage] || '—';
     const sizeTxt   = (d.suggested_position_pct != null) ? `~${d.suggested_position_pct.toFixed(1)}%` : '—';
+    const aiBadge   = d.ai_rating
+      ? `<span class="screen-rating" title="${(d.ai_verdict||'').replace(/"/g,'&quot;')}" style="color:${d.ai_color};border-color:${d.ai_color};background:${d.ai_color}22;cursor:help">${d.ai_rating}</span>`
+      : `<span style="color:#8b949e;font-size:.76rem">—</span>`;
     html += `<tr>
       <td><div class="screen-sym">${d.symbol}</div>${d.name ? `<div class="screen-name">${d.name}</div>` : ''}</td>
       <td><span class="screen-rating" style="color:${d.color};border-color:${d.color};background:${d.color}22">${d.rating}</span></td>
+      <td>${aiBadge}</td>
       <td style="font-family:monospace;font-size:.83rem">${d.price.toFixed(2)}</td>
       <td style="color:${chgColor};font-size:.83rem">${d.change>0?'+':''}${d.change.toFixed(2)}%</td>
       <td style="color:${d.stage_color||'#8b949e'};font-size:.8rem">${stageIcon} ${d.stage}</td>
@@ -2263,22 +2267,26 @@ function renderMyWatchlistTable(holdings) {
     return;
   }
   let html = `<table class="screen-table"><thead><tr>
-    <th>Symbol</th><th>Rating</th><th>Price</th><th>Change</th>
+    <th>Symbol</th><th>Rating</th><th>AI</th><th>Price</th><th>Change</th>
     <th>Stage</th><th>RSI</th><th></th>
   </tr></thead><tbody>`;
   holdings.forEach(d => {
     if (d.error) {
       html += `<tr><td class="screen-sym" style="color:#f85149">${d.symbol}</td>
-        <td colspan="5" style="color:#8b949e;font-size:.76rem">⚠ ${d.error}</td>
+        <td colspan="6" style="color:#8b949e;font-size:.76rem">⚠ ${d.error}</td>
         <td><button class="watch-remove" data-sym="${d.symbol}">✕</button></td></tr>`;
       return;
     }
     const chgColor  = d.change > 0 ? '#3fb950' : d.change < 0 ? '#f85149' : '#8b949e';
     const rsiColor  = d.rsi <= 30 ? '#3fb950' : d.rsi >= 70 ? '#f85149' : d.rsi >= 50 ? '#58a6ff' : '#8b949e';
     const stageIcon = {2:'↑',4:'↓',3:'⚠',1:'—'}[d.stage] || '—';
+    const aiBadge   = d.ai_rating
+      ? `<span class="screen-rating" title="${(d.ai_verdict||'').replace(/"/g,'&quot;')}" style="color:${d.ai_color};border-color:${d.ai_color};background:${d.ai_color}22;cursor:help">${d.ai_rating}</span>`
+      : `<span style="color:#8b949e;font-size:.76rem">—</span>`;
     html += `<tr>
       <td><div class="screen-sym">${d.symbol}</div>${d.name ? `<div class="screen-name">${d.name}</div>` : ''}</td>
       <td><span class="screen-rating" style="color:${d.color};border-color:${d.color};background:${d.color}22">${d.rating}</span></td>
+      <td>${aiBadge}</td>
       <td style="font-family:monospace;font-size:.83rem">${d.price.toFixed(2)}</td>
       <td style="color:${chgColor};font-size:.83rem">${d.change>0?'+':''}${d.change.toFixed(2)}%</td>
       <td style="color:${d.stage_color||'#8b949e'};font-size:.8rem">${stageIcon} ${d.stage}</td>

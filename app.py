@@ -1673,7 +1673,7 @@ def get_stock():
         return jsonify({"error": str(e), "detail": traceback.format_exc()}), 500
 
 
-def analyze_symbol(sym, period="1y", interval="1d"):
+def analyze_symbol(sym, period="1y", interval="1d", include_raw=False):
     """
     Full single-symbol analysis pipeline: fetches data via yfinance,
     computes all technical/fundamental signals, and returns a condensed
@@ -1748,7 +1748,7 @@ def analyze_symbol(sym, period="1y", interval="1d"):
         best_buy = (max(sigs["buy"], key=lambda z: z.get("stars", 0))
                     if sigs["buy"] else None)
 
-        return {
+        result = {
             "symbol":      sym,
             "name":        fundamentals.get("name"),
             "price":       price,
@@ -1776,6 +1776,17 @@ def analyze_symbol(sym, period="1y", interval="1d"):
                             else "#e3b341"),
             "verdict":     (arating.get("verdict", "") or "")[:200],
         }
+        if include_raw:
+            # Reuses this function's own already-fetched data for the AI
+            # Analyst step (My Portfolio/Watchlist) instead of re-fetching
+            # from yfinance a second time -- not included by default since
+            # the public Screener and background alert jobs also call this
+            # function and have no use for it.
+            result["_raw"] = {
+                "meta": meta, "stage": stg, "momentum": mom, "fundamentals": fundamentals,
+                "sentiment": sentiment, "patterns": pats, "signals": sigs,
+            }
+        return result
     except Exception as exc:
         return {"symbol": sym, "error": f"{type(exc).__name__}: {str(exc)[:100]}"}
 
@@ -1810,7 +1821,7 @@ def screen_stocks():
     return jsonify(results)
 
 
-def _portfolio_view_for(symbols):
+def _portfolio_view_for(symbols, include_ai=False):
     """
     Portfolio-level view for an arbitrary symbol list -- something no
     single-symbol page can show: current rating + suggested position size
@@ -1819,16 +1830,40 @@ def _portfolio_view_for(symbols):
     actually move together, e.g. multiple high-beta momentum names).
     Shared by the public /api/portfolio (alerts.PORTFOLIO) and the
     login-gated /api/my-portfolio (a subscriber's own holdings).
+
+    include_ai=True (My Portfolio/Watchlist only, never the public/
+    key-protected /api/portfolio) also attaches an independent AI Analyst
+    verdict per symbol, reusing ai_analyst's existing daily cache + cap --
+    opening this view can use up to one cap slot per symbol shown, same
+    cost model as looking at each symbol's own page individually.
     """
     if not symbols:
         return {"holdings": [], "correlation_matrix": {}, "avg_correlation": {}, "high_correlation_pairs": []}
 
     holdings = []
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(analyze_symbol, s, "1y"): s for s in symbols}
+        futures = {pool.submit(analyze_symbol, s, "1y", include_ai): s for s in symbols}
         for fut in as_completed(futures):
             holdings.append(fut.result())
     holdings.sort(key=lambda x: x.get("score", -99), reverse=True)
+
+    if include_ai:
+        for h in holdings:
+            raw = h.pop("_raw", None)
+            if not raw or h.get("error"):
+                continue
+            try:
+                verdict = ai_analyst.get_ai_verdict(
+                    h["symbol"], raw["meta"], raw["stage"], raw["momentum"],
+                    raw["fundamentals"], raw["sentiment"], raw["patterns"], raw["signals"])
+            except Exception as e:
+                app.logger.warning(f"_portfolio_view_for: ai_analyst failed for {h['symbol']}: {type(e).__name__}: {e}")
+                verdict = None
+            if verdict:
+                h["ai_rating"]  = verdict["rating"]
+                h["ai_score"]   = verdict["score"]
+                h["ai_color"]   = verdict["color"]
+                h["ai_verdict"] = verdict["verdict"]
 
     def _fetch_returns(sym):
         try:
@@ -1905,7 +1940,7 @@ def my_portfolio_view():
     if not email:
         return jsonify({"error": "not_logged_in"}), 401
     symbols = user_holdings.get_holdings(email)
-    result = _portfolio_view_for(symbols)
+    result = _portfolio_view_for(symbols, include_ai=True)
     result["symbols"] = symbols
     return jsonify(result)
 
@@ -1940,7 +1975,7 @@ def my_watchlist_view():
     if not email:
         return jsonify({"error": "not_logged_in"}), 401
     symbols = user_watchlist.get_watchlist(email)
-    result = _portfolio_view_for(symbols)
+    result = _portfolio_view_for(symbols, include_ai=True)
     result["symbols"] = symbols
     return jsonify(result)
 
