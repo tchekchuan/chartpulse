@@ -1778,13 +1778,17 @@ def analyze_symbol(sym, period="1y", interval="1d", include_raw=False):
         }
         if include_raw:
             # Reuses this function's own already-fetched data for the AI
-            # Analyst step (My Portfolio/Watchlist) instead of re-fetching
-            # from yfinance a second time -- not included by default since
-            # the public Screener and background alert jobs also call this
+            # Analyst step and the portfolio correlation matrix (My
+            # Portfolio/Watchlist) instead of re-fetching from yfinance a
+            # second time per symbol -- not included by default since the
+            # public Screener and background alert jobs also call this
             # function and have no use for it.
+            date_col = "Datetime" if "Datetime" in df.columns else "Date"
+            closes = pd.Series(df["Close"].values, index=pd.to_datetime(df[date_col]).dt.normalize())
             result["_raw"] = {
                 "meta": meta, "stage": stg, "momentum": mom, "fundamentals": fundamentals,
                 "sentiment": sentiment, "patterns": pats, "signals": sigs,
+                "returns": closes.pct_change().dropna(),
             }
         return result
     except Exception as exc:
@@ -1842,16 +1846,31 @@ def _portfolio_view_for(symbols, include_ai=False):
 
     holdings = []
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(analyze_symbol, s, "1y", include_raw=include_ai): s for s in symbols}
+        # include_raw=True unconditionally (not just for include_ai): the
+        # correlation matrix below used to re-fetch each symbol's price
+        # history a second time from yfinance just for this, doubling
+        # Yahoo Finance round-trips and real wall-clock load time for no
+        # benefit -- analyze_symbol already computed the same returns
+        # series once, so reuse it instead of fetching it again.
+        futures = {pool.submit(analyze_symbol, s, "1y", include_raw=True): s for s in symbols}
         for fut in as_completed(futures):
             holdings.append(fut.result())
     holdings.sort(key=lambda x: x.get("score", -99), reverse=True)
 
-    if include_ai:
-        for h in holdings:
-            raw = h.pop("_raw", None)
-            if not raw or h.get("error"):
-                continue
+    # Portfolio spans HKEX/Nasdaq Stockholm/NYSE -- each comes back tz-aware
+    # in its own exchange's local timezone, so the same calendar day won't
+    # align across symbols unless normalized (already done by analyze_symbol
+    # when it built this series).
+    returns = {}
+    for h in holdings:
+        raw = h.pop("_raw", None)
+        if not raw or h.get("error"):
+            continue
+        r = raw.get("returns")
+        if r is not None and len(r) > 5:
+            returns[h["symbol"]] = r
+
+        if include_ai:
             try:
                 verdict = ai_analyst.get_ai_verdict(
                     h["symbol"], raw["meta"], raw["stage"], raw["momentum"],
@@ -1865,26 +1884,6 @@ def _portfolio_view_for(symbols, include_ai=False):
                 h["ai_score"]   = verdict["score"]
                 h["ai_color"]   = verdict["color"]
                 h["ai_verdict"] = verdict["verdict"]
-
-    def _fetch_returns(sym):
-        try:
-            df = yf.Ticker(sym).history(period="1y", interval="1d")
-            if df is None or df.empty:
-                return sym, None
-            r = df["Close"].pct_change().dropna()
-            # Portfolio spans HKEX/Nasdaq Stockholm/NYSE -- each comes back
-            # tz-aware in its own exchange's local timezone, so the same
-            # calendar day won't align across symbols unless normalized.
-            r.index = pd.to_datetime(r.index.date)
-            return sym, r
-        except Exception:
-            return sym, None
-
-    returns = {}
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        for sym, r in pool.map(_fetch_returns, symbols):
-            if r is not None and len(r) > 5:
-                returns[sym] = r
 
     corr_matrix, avg_correlation, high_correlation_pairs = {}, {}, []
     if len(returns) >= 2:
