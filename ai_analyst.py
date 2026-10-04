@@ -176,11 +176,14 @@ def get_ai_verdict(symbol, meta, stage, momentum, fundamentals, sentiment, patte
     )
 
     try:
-        response = _client.beta.messages.create(
+        # Plain (non-beta) endpoint -- refusal detection via stop_reason is
+        # GA and needs no beta header. The server-side-fallback beta feature
+        # was dropped here: it requires a newer anthropic SDK version than
+        # the one pinned in requirements.txt, and a refused call already
+        # degrades safely to "no AI panel this time" without it.
+        response = _client.messages.create(
             model="claude-opus-5-5",
             max_tokens=1024,
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
             output_config={"effort": "high"},
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
