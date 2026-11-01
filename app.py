@@ -2099,6 +2099,21 @@ def _research_args(src):
         return None, None, None, (jsonify({"error": "Invalid symbol"}), 400)
     if report not in equity_research.REPORT_TYPES:
         return None, None, None, (jsonify({"error": "Invalid report type"}), 400)
+    if report == "thesis":
+        # POST carries the thesis text; polling GETs carry only its key
+        # (keeps up-to-2,000-char theses out of URLs). The key then rides
+        # in the horizon slot, which is what the cache row is keyed on.
+        if src.get("thesis") is not None:
+            text = equity_research.normalise_thesis(src.get("thesis"))
+            if not text:
+                return None, None, None, (jsonify({"error":
+                    f"Write your thesis in {equity_research.THESIS_MIN}-"
+                    f"{equity_research.THESIS_MAX} characters"}), 400)
+            return symbol, report, equity_research.thesis_key(text), None
+        key = (src.get("thesis_key") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{16}", key):
+            return None, None, None, (jsonify({"error": "Missing thesis"}), 400)
+        return symbol, report, key, None
     if horizon not in equity_research.HORIZONS:
         return None, None, None, (jsonify({"error": "Invalid horizon"}), 400)
     return symbol, report, horizon, None
@@ -2121,9 +2136,11 @@ def research_status():
 def research_start():
     if not session.get("email"):
         return jsonify({"error": "Log in to use Equity Research"}), 401
-    symbol, report, horizon, err = _research_args(request.get_json(silent=True) or {})
+    body = request.get_json(silent=True) or {}
+    symbol, report, horizon, err = _research_args(body)
     if err:
         return err
+    thesis = equity_research.normalise_thesis(body.get("thesis")) if report == "thesis" else None
     # Usually a cache hit -- the user has just loaded this symbol's page.
     # The name keeps the model from confusing tickers shared across exchanges.
     # A valuation is compared with a price the site itself verified, not
@@ -2138,7 +2155,10 @@ def research_start():
             name = get_fundamentals(yf.Ticker(symbol)).get("name")
         except Exception:
             name = None
-    return jsonify(equity_research.start(symbol, report, horizon, name, quote))
+    result = equity_research.start(symbol, report, horizon, name, quote, thesis)
+    if report == "thesis":
+        result["thesis_key"] = horizon   # the page polls with this, not the text
+    return jsonify(result)
 
 
 @app.route("/api/track-record")

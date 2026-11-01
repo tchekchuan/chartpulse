@@ -671,6 +671,7 @@
           <option value="earnings">Earnings review</option>
           <option value="compare">Peer comparison</option>
           <option value="value">Intrinsic value</option>
+          <option value="thesis">Challenge my thesis</option>
         </select>
         <input id="researchPeers" placeholder="Peers, e.g. AMD, INTC" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem;width:150px">
         <select id="researchHorizon">
@@ -678,6 +679,7 @@
           <option value="3y" selected>3-year horizon</option>
           <option value="5y">5-year horizon</option>
         </select>
+        <textarea id="researchThesis" rows="4" maxlength="2000" placeholder="Your thesis, e.g. 'AI data-centre demand doubles SiC revenue by 2028 and margins turn positive'" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.8rem;font-family:inherit;width:100%;box-sizing:border-box;resize:vertical"></textarea>
         <button id="researchOpenBtn">Open report</button>
       </div>
     </div>
@@ -2015,6 +2017,12 @@ function openResearch(report, horizon, peersText) {
     document.getElementById('researchTitle').textContent = `🔬 Peer Comparison — ${list.join(' vs ')}`;
     return startResearch({symbol: list.join(','), report, horizon: '3y'}, ++_researchToken);
   }
+  if (report === 'thesis') {
+    const text = String(peersText || '').trim();
+    document.getElementById('researchTitle').textContent = `🔬 ${sym} — Thesis Challenge`;
+    if (text.length < 20 || text.length > 2000) { _researchToken++; return researchMessage('Write your investment thesis for ' + esc(sym) + ' first (20–2,000 characters): what you believe will happen and why.'); }
+    return startResearch({symbol: sym, report, horizon: '3y', thesis: text}, ++_researchToken);
+  }
   const req = {symbol: sym, report, horizon};
   const label = {financial: 'Financial Strength', earnings: 'Earnings Review (latest quarter)',
                  value: `Intrinsic Value · ${HORIZON_LABELS[horizon]}`}[report]
@@ -2031,10 +2039,13 @@ document.getElementById('researchType').addEventListener('change', e => {
   // Only the business report takes a horizon.
   document.getElementById('researchHorizon').style.display = ['business', 'value'].includes(e.target.value) ? '' : 'none';
   document.getElementById('researchPeers').style.display = e.target.value === 'compare' ? '' : 'none';
+  document.getElementById('researchThesis').style.display = e.target.value === 'thesis' ? '' : 'none';
 });
 document.getElementById('researchOpenBtn').addEventListener('click', () =>
   openResearch(document.getElementById('researchType').value, document.getElementById('researchHorizon').value,
-               document.getElementById('researchPeers').value));
+               document.getElementById('researchType').value === 'thesis'
+                 ? document.getElementById('researchThesis').value
+                 : document.getElementById('researchPeers').value));
 
 // Top-bar entry point: always opens the Research window, so it is never a
 // silent no-op. Logged-out visitors get told why and offered the login;
@@ -2067,8 +2078,12 @@ document.getElementById('researchBtn').addEventListener('click', () => {
         <input id="researchPickPeers" placeholder="Peers, e.g. AMD, INTC" style="flex:1;min-width:0;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.82rem">
         <button id="researchPickCmp" style="${btn}">Compare</button>
       </div>
+      <textarea id="researchPickThesis" rows="3" maxlength="2000" placeholder="Your thesis for ${esc(sym)} — what you believe and why" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.8rem;font-family:inherit;width:100%;box-sizing:border-box;resize:vertical"></textarea>
+      <button id="researchPickThesisBtn" style="${btn}">Challenge my thesis — 5 strongest objections</button>
       <div class="research-muted" style="text-align:center">First run takes 1–3 minutes; after that it opens instantly for a week.</div>
     </div>`);
+  document.getElementById('researchPickThesisBtn').addEventListener('click', () =>
+    openResearch('thesis', '3y', document.getElementById('researchPickThesis').value));
   document.getElementById('researchPickCmp').addEventListener('click', () =>
     openResearch('compare', '3y', document.getElementById('researchPickPeers').value));
   document.getElementById('researchPickBiz').addEventListener('click', () =>
@@ -2105,6 +2120,7 @@ async function startResearch(req, token) {
     if (token === _researchToken) researchMessage(`Network error: ${esc(err.message)}`);
     return;
   }
+  if (data.thesis_key) req.thesis_key = data.thesis_key;
   handleResearch(req, token, data, 0);
 }
 
@@ -2112,7 +2128,7 @@ function handleResearch(req, token, data, polls) {
   if (token !== _researchToken) return;   // modal closed or reopened
   const s = data.status;
   if (s === 'ready') {
-    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare, value: renderValue}[req.report] || renderResearch;
+    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare, value: renderValue, thesis: renderThesis}[req.report] || renderResearch;
     return render(data.report, data.generated_at);
   }
   if (s === 'capped')      return researchMessage("Today's limit for new research reports has been reached. Reports already generated this week still open instantly — try again tomorrow for this one.");
@@ -2130,13 +2146,15 @@ function handleResearch(req, token, data, polls) {
   const what = {financial: 'annual and interim filings, cash-flow statements and peers',
                 earnings: 'the earnings release, quarterly filing and call transcript',
                 compare: "each company's filings and current valuation data",
-                value: 'filings, share count and discount-rate inputs, then building the scenarios'}[req.report]
+                value: 'filings, share count and discount-rate inputs, then building the scenarios',
+                thesis: 'filings, competitor disclosures and industry data for the strongest objections'}[req.report]
                || 'recent filings, earnings calls and news';
   researchMessage(`<div class="research-spinner"></div>Researching ${esc(req.symbol)} — reading ${what}…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
   setTimeout(async () => {
     if (token !== _researchToken) return;
     try {
-      const q    = new URLSearchParams(req).toString();
+      const {thesis, ...params} = req;   // thesis text stays out of the URL; thesis_key is enough
+      const q    = new URLSearchParams(params).toString();
       const res  = await fetch(`/api/research?${q}`);
       const next = await res.json();
       if (!res.ok) return researchMessage(esc(next.error || `Error ${res.status}`));
@@ -2261,6 +2279,50 @@ function renderEarnings(r, generatedAt) {
   html += `<h4>3 Critical Questions Before Drawing Conclusions</h4><ol>${
     (r.questions || []).map(q => `<li>${esc(q)}</li>`).join('')}</ol>`;
 
+  html += researchSources(r.sources);
+  document.getElementById('researchBody').innerHTML = html;
+}
+
+function renderThesis(r, generatedAt) {
+  const cite = makeCite(r.sources);
+  const when = generatedAt ? new Date(generatedAt).toLocaleDateString() : '';
+  const lvl = {High: '#f85149', Medium: '#e3b341', Low: '#8b949e', Strong: '#3fb950', Moderate: '#e3b341', Weak: '#8b949e'};
+  const badge = (prefix, o) => {
+    const c = lvl[(o || {}).level] || '#8b949e';
+    return `<span class="research-kind" style="color:${c};border-color:${c};background:${c}22">${prefix}: ${esc((o || {}).level || '—')}</span>`;
+  };
+  let html = `<div class="research-muted" style="margin-bottom:10px">${esc(r.company)}${when ? ' · generated ' + esc(when) : ''}</div>`;
+  html += `<h4>Your Thesis</h4><div style="border-left:3px solid #30363d;padding-left:10px;font-style:italic">${esc(r.thesis)}</div>`;
+  if (r.thesis_restated) html += `<h4>How a Skeptic Reads It</h4><div>${esc(r.thesis_restated)}</div>`;
+
+  html += '<h4>Five Strongest Objections</h4><div class="research-muted" style="margin-bottom:6px">Ranked by potential financial impact and evidence quality, #1 = most damaging and best supported.</div>';
+  (r.objections || []).forEach(o => {
+    html += `<div style="border:1px solid #30363d;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+        <strong style="font-size:1rem">#${esc(o.rank)} ${esc(o.title)}</strong>
+        ${badge('Impact', o.financial_impact)} ${badge('Evidence', o.evidence_quality)}
+      </div>
+      <div>${esc(o.argument)}</div>
+      <ul style="margin-top:6px">${(o.evidence || []).map(e => `<li>${esc(e.point)}${cite(e.source)}</li>`).join('')}</ul>
+      <div class="research-muted"><strong>Impact:</strong> ${esc((o.financial_impact || {}).explanation)}</div>
+      <div class="research-muted"><strong>Evidence quality:</strong> ${esc((o.evidence_quality || {}).explanation)}</div>
+      ${researchTable(['Assumption challenged', 'Would confirm the objection', 'Would weaken it', 'Warning indicators'],
+        [[esc(o.assumption_challenged), esc(o.would_confirm), esc(o.would_weaken),
+          `<ul style="margin:0;padding-left:16px">${(o.warning_indicators || []).map(w => `<li>${esc(w)}</li>`).join('')}</ul>`]])}
+    </div>`;
+  });
+
+  html += '<h4>Assumptions Most Likely to Be Wrong</h4>' + researchTable(['Assumption', 'Why it may be wrong', 'How to test it'],
+    (r.fragile_assumptions || []).map(a => [`<strong>${esc(a.assumption)}</strong>`, esc(a.why_likely_wrong), esc(a.how_to_test)]));
+
+  if ((r.monitoring || []).length) html += '<h4>Warning Indicators to Monitor</h4>' + researchTable(['Indicator', 'Latest', 'Warning level', 'Where', 'How often'],
+    r.monitoring.map(m => [`<strong>${esc(m.indicator)}</strong>`, esc(m.current), esc(m.warning_level), esc(m.where_to_find), esc(m.frequency)]));
+
+  const b = r.blind_spot || {};
+  html += `<h4>The Single Biggest Blind Spot</h4>
+    <div style="border:1px solid #f85149;background:#f8514914;border-radius:8px;padding:10px 12px">
+      <strong>${esc(b.title)}</strong><div style="margin-top:4px">${esc(b.explanation)}</div></div>`;
+  html += '<div class="research-muted" style="margin-top:10px">A deliberately one-sided critique to stress-test your reasoning. It is not a recommendation to buy or sell.</div>';
   html += researchSources(r.sources);
   document.getElementById('researchBody').innerHTML = html;
 }
