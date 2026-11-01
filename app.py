@@ -2055,7 +2055,16 @@ def _research_args(src):
     symbol  = (src.get("symbol") or "").strip().upper()
     report  = (src.get("report") or "business").strip().lower()
     horizon = (src.get("horizon") or "3y").strip().lower()
-    if not _RESEARCH_SYMBOL_RE.match(symbol):
+    if report == "compare":
+        # "symbol" is a comma-separated list; canonicalised (deduped,
+        # sorted) so the same set in any order is one cache row.
+        tickers = equity_research.parse_tickers(symbol)
+        if not tickers or not all(_RESEARCH_SYMBOL_RE.match(t) for t in tickers):
+            return None, None, None, (jsonify({"error":
+                f"Enter {equity_research.COMPARE_MIN}-{equity_research.COMPARE_MAX} "
+                "different tickers, separated by commas"}), 400)
+        symbol = ",".join(tickers)
+    elif not _RESEARCH_SYMBOL_RE.match(symbol):
         return None, None, None, (jsonify({"error": "Invalid symbol"}), 400)
     if report not in equity_research.REPORT_TYPES:
         return None, None, None, (jsonify({"error": "Invalid report type"}), 400)
@@ -2086,10 +2095,14 @@ def research_start():
         return err
     # Usually a cache hit -- the user has just loaded this symbol's page.
     # The name keeps the model from confusing tickers shared across exchanges.
-    try:
-        name = get_fundamentals(yf.Ticker(symbol)).get("name")
-    except Exception:
-        name = None
+    # Skipped for a comparison: up to 5 uncached lookups could run past
+    # gunicorn's 30s timeout, and the prompt names each ticker anyway.
+    name = None
+    if report != "compare":
+        try:
+            name = get_fundamentals(yf.Ticker(symbol)).get("name")
+        except Exception:
+            name = None
     return jsonify(equity_research.start(symbol, report, horizon, name))
 
 

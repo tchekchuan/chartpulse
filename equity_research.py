@@ -29,6 +29,16 @@
 #       surprises, hidden weaknesses, 3 critical questions. Cached for
 #       EARNINGS_CACHE_DAYS (default 2) so a new release isn't missed.
 #
+#       Fourth report type, "compare": 2-5 tickers side by side on
+#       aligned periods (TTM to a common quarter) -- growth,
+#       profitability, FCF, balance sheet, dilution, positioning and
+#       valuation multiples, business-model differences, metrics that
+#       mislead across these companies, a business-quality ranking, a
+#       relative-valuation ranking, and whether the valuation gap looks
+#       reasonable. Its "symbol" is the sorted ticker list ("AMD,NVDA"),
+#       so the same set in any order shares one cache row. Multiples
+#       move with price, so it's cached COMPARE_CACHE_DAYS (default 3).
+#
 #       A report takes 1-3 minutes (several web searches), far past
 #       gunicorn's 30s worker timeout on a single sync worker, so it
 #       runs in a background thread and the page polls for it.
@@ -65,16 +75,21 @@ HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
 # `horizon` column is the cache key: "1y"/"3y"/"5y" for a business report,
 # FIN_KEY / EARN_KEY for the financial-strength and earnings reports
 # (neither has a horizon).
-REPORT_TYPES = ("business", "financial", "earnings")
+REPORT_TYPES = ("business", "financial", "earnings", "compare")
 FIN_KEY = "fin"
 EARN_KEY = "earn"
+CMP_KEY = "cmp"
+COMPARE_MIN, COMPARE_MAX = 2, 5
 # An earnings review is about the latest quarter, so a week-old copy could
 # miss a release that landed in between -- keep it much fresher.
 EARNINGS_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_EARNINGS_CACHE_DAYS", "2"))
+# Valuation multiples move with the share price, so a comparison goes
+# stale faster than a fundamentals-only report.
+COMPARE_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_COMPARE_CACHE_DAYS", "3"))
 
 
 def cache_key(report, horizon):
-    return {"financial": FIN_KEY, "earnings": EARN_KEY}.get(report, horizon)
+    return {"financial": FIN_KEY, "earnings": EARN_KEY, "compare": CMP_KEY}.get(report, horizon)
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
@@ -214,10 +229,77 @@ def _earnings_prompt(who):
     )
 
 
+COMPARE_SHAPE = """{
+  "companies": [{"ticker": "", "name": "", "currency": "reporting currency",
+                 "fiscal_year_end": "", "latest_quarter": "latest reported quarter and its end date",
+                 "business_model": "1-2 sentences: how it makes money"}],
+  "period_basis": "how periods were aligned, e.g. 'TTM to the latest quarter ended on or before Sep 30, 2026; fiscal years differ: ...'",
+  "price_date": "date of the share prices behind the valuation multiples",
+  "metrics": [
+    {"metric": "Revenue (TTM)", "category": "Growth", "cells": [{"value": "", "source": 1}]},
+    "... one row per metric listed in the instructions, each with exactly one cell per company in the same order as companies"
+  ],
+  "business_model_differences": "how the models differ and why that changes which metrics matter",
+  "competitive_positioning": [{"ticker": "", "position": "", "evidence": ""}],
+  "misleading_metrics": [{"metric": "", "why_misleading": "", "better_comparison": ""}],
+  "quality_ranking": [{"rank": 1, "ticker": "", "justification": "evidence-based, cite figures"}],
+  "valuation_ranking": [{"rank": 1, "ticker": "", "justification": "rank 1 = least expensive relative to its fundamentals"}],
+  "valuation_gap": {"assessment": "Reasonable | Partly reasonable | Not reasonable",
+                    "explanation": "does the spread in multiples match the spread in quality, growth and risk?"},
+  "caveats": [""],
+  "sources": [{"id": 1, "title": "", "url": ""}]
+}"""
+
+
+def _compare_prompt(tickers):
+    names = ", ".join(tickers)
+    return (
+        f"Compare {names} using consistent reporting periods and industry-appropriate "
+        "metrics. Align periods first: use trailing twelve months (TTM) ending at the latest "
+        "quarter all companies have reported (or the closest common point when fiscal years "
+        "differ), and state the alignment in period_basis. Never mix one company's fiscal "
+        "year with another's TTM without saying so.\n\n"
+        "Evaluate revenue growth, profitability, free cash flow, balance-sheet strength, "
+        "dilution, competitive positioning, and valuation multiples. Metric rows, in this "
+        "order: Revenue (TTM), Revenue growth YoY (TTM), Revenue 3-yr CAGR, Gross margin, "
+        "Operating margin (GAAP), Free cash flow (TTM), FCF margin, Stock-based comp % of "
+        "revenue, Net cash / (net debt), Net debt / EBITDA, Diluted share count change YoY, "
+        "Market cap, EV / Sales, EV / EBIT (or EV / EBITDA -- say which), P/E (say TTM or "
+        "forward), P / FCF -- then 1-3 industry-specific metrics that matter for these "
+        "companies (e.g. net revenue retention for SaaS, same-store sales for retail, net "
+        "interest margin for banks, backlog/book-to-bill for semis). Category is one of "
+        "Growth, Profitability, Cash flow, Balance sheet, Dilution, Valuation, Industry. "
+        "If a metric is meaningless for a company (e.g. P/E with negative earnings, EV/EBITDA "
+        "for a bank), say so in the value instead of a number.\n\n"
+        "Explain the differences in business models and identify metrics that could create "
+        "misleading comparisons between THESE companies (different fiscal years, GAAP vs "
+        "adjusted, SBC excluded from FCF, acquisitions inflating growth, one-offs, currency, "
+        "cyclical peaks, different capital intensity). Rank the companies by business quality "
+        "and separately by relative valuation, justifying each rank with figures from the "
+        "table. Then judge whether the valuation gap between them appears reasonable given "
+        "the quality, growth and risk differences. Rankings are comparative analysis, not "
+        "buy/sell recommendations -- do not add ratings or price targets.\n\n"
+        "Citation rules: every cell's \"source\" is the id of the entry in sources the figure "
+        "came from; for a calculated figure cite its inputs' source and add ' (calc)'. If a "
+        "figure cannot be found, value 'n/a' and source null -- never estimate it. Prices and "
+        "market caps must be dated in price_date.\n\n"
+        "Your final message must be ONLY a JSON object (no markdown fences, no other "
+        f"text) in exactly this shape:\n{COMPARE_SHAPE}"
+    )
+
+
+def parse_tickers(raw):
+    """'nvda, amd ,NVDA' -> ['AMD', 'NVDA'] (deduped, sorted), or None if the
+    count is outside COMPARE_MIN..COMPARE_MAX. Format checks are the caller's."""
+    tickers = sorted({t.strip().upper() for t in str(raw).split(",") if t.strip()})
+    return tickers if COMPARE_MIN <= len(tickers) <= COMPARE_MAX else None
+
+
 REQUIRED = {
     "business": ("summary", "opportunities", "risks", "questions"),
     "financial": ("periods", "metrics", "analysis", "sources"),
     "earnings": ("period", "results", "drivers", "questions"),
+    "compare": ("companies", "metrics", "quality_ranking", "valuation_ranking", "valuation_gap"),
 }
 
 
@@ -247,7 +329,7 @@ def init_db():
 def _get_cached(symbol, horizon):
     if not DATABASE_URL:
         return None
-    days = EARNINGS_CACHE_DAYS if horizon == EARN_KEY else CACHE_DAYS
+    days = {EARN_KEY: EARNINGS_CACHE_DAYS, CMP_KEY: COMPARE_CACHE_DAYS}.get(horizon, CACHE_DAYS)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     with _conn() as conn:
         with conn.cursor() as cur:
@@ -313,6 +395,10 @@ def _validate(report, kind):
         report["risks"] = report["risks"][:3]
     elif kind == "earnings":
         report["questions"] = report["questions"][:3]
+    elif kind == "compare":
+        report["metrics"] = [m for m in report["metrics"] if isinstance(m, dict) and m.get("cells")]
+        if not report["metrics"]:
+            raise ValueError("report has no metric rows")
     else:
         # The model sometimes echoes the "... one row each" hint from the
         # shape as a literal string -- keep only real metric rows.
@@ -333,6 +419,11 @@ def _generate(symbol, kind, horizon, company_name):
         prompt = today + _earnings_prompt(who)
         # Release + 10-Q + transcript + prior guidance + consensus.
         max_uses = 12
+    elif kind == "compare":
+        tickers = symbol.split(",")
+        prompt = today + _compare_prompt(tickers)
+        # Filings + price/valuation data for each company.
+        max_uses = min(20, 4 + 4 * len(tickers))
     else:
         prompt = today + _business_prompt(who, HORIZONS[horizon])
         max_uses = 8
