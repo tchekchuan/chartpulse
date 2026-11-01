@@ -2114,6 +2114,13 @@ def _research_args(src):
         if not re.fullmatch(r"[0-9a-f]{16}", key):
             return None, None, None, (jsonify({"error": "Missing thesis"}), 400)
         return symbol, report, key, None
+    if report == "news":
+        # Start/end dates travel on every call (short, so fine in a URL);
+        # the canonical "YYYYMMDD-YYYYMMDD" rides in the horizon slot.
+        key, msg = equity_research.parse_news_range(src.get("start"), src.get("end"))
+        if not key:
+            return None, None, None, (jsonify({"error": msg}), 400)
+        return symbol, report, key, None
     if horizon not in equity_research.HORIZONS:
         return None, None, None, (jsonify({"error": "Invalid horizon"}), 400)
     return symbol, report, horizon, None

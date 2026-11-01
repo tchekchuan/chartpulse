@@ -61,6 +61,15 @@
 #       as the claim under review. Cache key "th" + a hash of the
 #       normalised thesis, so each thesis per symbol has its own row.
 #
+#       Seventh report type, "news": material news between a start and
+#       end date (max NEWS_MAX_DAYS), deduplicated, each item labelled
+#       Confirmed / Reported / Speculation and by source type, in a
+#       timeline with event date, publication date, source, business
+#       impact and its timing, plus upcoming verifiable catalysts with
+#       bull/bear implications. _check_news() drops items dated outside
+#       the requested range and sorts by date. Cache key
+#       "nw" + "YYYYMMDD-YYYYMMDD", NEWS_CACHE_DAYS (default 1).
+#
 #       A report takes 1-3 minutes (several web searches), far past
 #       gunicorn's 30s worker timeout on a single sync worker, so it
 #       runs in a background thread and the page polls for it.
@@ -99,7 +108,7 @@ HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
 # `horizon` column is the cache key: "1y"/"3y"/"5y" for a business report,
 # FIN_KEY / EARN_KEY for the financial-strength and earnings reports
 # (neither has a horizon).
-REPORT_TYPES = ("business", "financial", "earnings", "compare", "value", "thesis")
+REPORT_TYPES = ("business", "financial", "earnings", "compare", "value", "thesis", "news")
 FIN_KEY = "fin"
 EARN_KEY = "earn"
 CMP_KEY = "cmp"
@@ -119,6 +128,36 @@ VALUE_TOLERANCE = 0.02
 THESIS_PREFIX = "th"
 THESIS_MIN, THESIS_MAX = 20, 2000
 THESIS_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_THESIS_CACHE_DAYS", "7"))
+NEWS_PREFIX = "nw"
+NEWS_MAX_DAYS = 366
+# News keeps arriving, so a news report is only reused for a day.
+NEWS_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_NEWS_CACHE_DAYS", "1"))
+
+
+def parse_news_range(start, end):
+    """'2026-10-01', '2026-11-02' -> ('20261001-20261102', None) or
+    (None, error message). End may not be in the future (one day of
+    slack for time zones); the range is at most NEWS_MAX_DAYS."""
+    try:
+        s = datetime.strptime(str(start or "").strip(), "%Y-%m-%d").date()
+        e = datetime.strptime(str(end or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None, "Dates must be YYYY-MM-DD"
+    today = datetime.now(timezone.utc).date()
+    if s > e:
+        return None, "Start date must be on or before the end date"
+    if e > today + timedelta(days=1):
+        return None, "End date can't be in the future"
+    if s.year < 2000:
+        return None, "Start date is too early"
+    if (e - s).days > NEWS_MAX_DAYS:
+        return None, f"Choose a range of at most {NEWS_MAX_DAYS} days"
+    return f"{s:%Y%m%d}-{e:%Y%m%d}", None
+
+
+def _range_dates(key):
+    a, b = key.split("-")
+    return datetime.strptime(a, "%Y%m%d").date(), datetime.strptime(b, "%Y%m%d").date()
 
 
 def normalise_thesis(text):
@@ -140,6 +179,8 @@ def cache_key(report, horizon):
         return VALUE_PREFIX + horizon
     if report == "thesis":
         return THESIS_PREFIX + horizon   # horizon carries the thesis key
+    if report == "news":
+        return NEWS_PREFIX + horizon     # horizon carries "YYYYMMDD-YYYYMMDD"
     return {"financial": FIN_KEY, "earnings": EARN_KEY, "compare": CMP_KEY}.get(report, horizon)
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
@@ -515,6 +556,88 @@ def _thesis_prompt(who, thesis):
     )
 
 
+NEWS_SHAPE = """{
+  "company": "full company name",
+  "summary": "3-5 sentences: what materially changed for the business in this period",
+  "timeline": [
+    {"event_date": "YYYY-MM-DD the event happened (or was announced)", "published": "YYYY-MM-DD of the source used",
+     "headline": "", "source_name": "e.g. 'Company press release', 'Form 8-K', 'Reuters'",
+     "source_type": "Company announcement | Regulatory filing | Financial press | Industry / other",
+     "status": "Confirmed | Reported | Speculation",
+     "what_happened": "facts only",
+     "business_impact": {"level": "High | Medium | Low", "explanation": "which line of the business it affects and how"},
+     "impact_timing": "when the impact would show up, e.g. 'next quarter's results', '2027-2028'",
+     "bullish": "possible positive implication", "bearish": "possible negative implication",
+     "duplicates_merged": 0, "source": 1}
+  ],
+  "catalysts": [
+    {"date": "YYYY-MM-DD, or a window like '2027 Q1'", "date_status": "Confirmed | Estimated",
+     "type": "Earnings | Product launch | Regulatory decision | Financing / debt | Legal | Index / corporate | Other",
+     "event": "", "why_it_matters": "", "bullish": "", "bearish": "", "source": 1}
+  ],
+  "excluded": "one line on what kinds of stories were left out as immaterial or not credible",
+  "sources": [{"id": 1, "title": "", "url": "", "date": "YYYY-MM-DD"}]
+}"""
+
+
+def _news_prompt(who, key):
+    s, e = _range_dates(key)
+    return (
+        f"Research material news and developments affecting {who} between {s:%Y-%m-%d} and "
+        f"{e:%Y-%m-%d} (inclusive). Prioritize official company announcements (press releases, "
+        "investor-relations posts), regulatory filings (8-K, 10-Q, 10-K, 6-K, proxy, Form 4 for "
+        "significant insider trades, court and agency records), and credible financial reporting "
+        "(Reuters, Bloomberg, WSJ, FT, CNBC, Barron's, major trade press). Blogs, forums, social "
+        "media and stock-promotion sites are never confirmation of anything.\n\n"
+        "Rules: only include items whose event_date or published date falls inside the range. "
+        "Remove duplicate stories -- one timeline row per real event, citing the most primary "
+        "source, with duplicates_merged counting the other write-ups you folded in. Label status "
+        "Confirmed only if the company, a filing or an official body confirms it; Reported if "
+        "credible press reports it without confirmation; Speculation for analyst opinion, rumour, "
+        "or unnamed-source claims. Keep facts out of what_happened if they are opinion. Leave out "
+        "routine noise (price-move articles, generic listicles, rating reiterations) unless it "
+        "is material.\n\n"
+        "Then identify upcoming catalysts after the range: next earnings date, product launches, "
+        "regulatory decisions, debt maturities or financings, court dates, index events -- each "
+        "verifiable from a source, with date_status Estimated unless the company or an official "
+        "body has set the date.\n\n"
+        "Explain possible bullish and bearish implications for each item without implying that "
+        "any event guarantees a particular stock-price move. No buy/sell rating or price target. "
+        "If the period had little material news, say so rather than padding the timeline.\n\n"
+        "Your final message must be ONLY a JSON object (no markdown fences, no other "
+        f"text) in exactly this shape:\n{NEWS_SHAPE}"
+    )
+
+
+def _parse_day(v):
+    try:
+        return datetime.strptime(str(v or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _check_news(report, key):
+    """Drops timeline rows dated outside the requested range (a row stays
+    if either its event date or its publication date is inside, or if
+    neither parses -- then it's shown, not silently lost) and sorts by date."""
+    s, e = _range_dates(key)
+    kept, dropped = [], 0
+    for row in report["timeline"]:
+        if not isinstance(row, dict):
+            continue
+        days = [d for d in (_parse_day(row.get("event_date")), _parse_day(row.get("published"))) if d]
+        if days and not any(s <= d <= e for d in days):
+            dropped += 1
+            continue
+        kept.append(row)
+    kept.sort(key=lambda r: str(r.get("event_date") or r.get("published") or ""))
+    report["timeline"] = kept
+    report["range"] = {"start": f"{s:%Y-%m-%d}", "end": f"{e:%Y-%m-%d}"}
+    report["checks"] = [f"{dropped} item(s) dated outside {s:%Y-%m-%d} to {e:%Y-%m-%d} were removed."] if dropped else []
+    report["catalysts"] = [c for c in report.get("catalysts") or [] if isinstance(c, dict)]
+    return report
+
+
 REQUIRED = {
     "business": ("summary", "opportunities", "risks", "questions"),
     "financial": ("periods", "metrics", "analysis", "sources"),
@@ -522,6 +645,8 @@ REQUIRED = {
     "compare": ("companies", "metrics", "quality_ranking", "valuation_ranking", "valuation_gap"),
     "value": ("method", "scenarios", "sensitivity", "implied_expectations"),
     "thesis": ("objections", "fragile_assumptions", "blind_spot"),
+    # An empty timeline is a legitimate answer for a quiet period.
+    "news": ("summary",),
 }
 
 
@@ -556,6 +681,8 @@ def _get_cached(symbol, horizon):
         days = VALUE_CACHE_DAYS
     elif horizon.startswith(THESIS_PREFIX):
         days = THESIS_CACHE_DAYS
+    elif horizon.startswith(NEWS_PREFIX):
+        days = NEWS_CACHE_DAYS
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     with _conn() as conn:
         with conn.cursor() as cur:
@@ -633,6 +760,10 @@ def _validate(report, kind):
         if len(obj) < 5:
             raise ValueError("report needs 5 objections")
         report["objections"] = sorted(obj, key=lambda x: x.get("rank") or 99)[:5]
+    elif kind == "news":
+        if not isinstance(report.get("timeline", []), list):
+            raise ValueError("timeline is not a list")
+        report.setdefault("timeline", [])
     else:
         # The model sometimes echoes the "... one row each" hint from the
         # shape as a literal string -- keep only real metric rows.
@@ -666,6 +797,10 @@ def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None):
         prompt = today + _thesis_prompt(who, thesis)
         # Company filings + competitor filings + industry data, 5 objections.
         max_uses = 14
+    elif kind == "news":
+        prompt = today + _news_prompt(who, horizon)
+        # IR page + EDGAR + several press searches + catalyst calendar.
+        max_uses = 14
     else:
         prompt = today + _business_prompt(who, HORIZONS[horizon])
         max_uses = 8
@@ -696,6 +831,8 @@ def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None):
         report = _validate(_extract_json(response.content), kind)
         if kind == "thesis":
             report["thesis"] = thesis   # the page shows exactly what was challenged
+        if kind == "news":
+            report = _check_news(report, horizon)
         return _check_value(report, quote) if kind == "value" else report
 
     raise RuntimeError("still paused after 4 continuations")

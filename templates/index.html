@@ -672,6 +672,7 @@
           <option value="compare">Peer comparison</option>
           <option value="value">Intrinsic value</option>
           <option value="thesis">Challenge my thesis</option>
+          <option value="news">News &amp; catalysts</option>
         </select>
         <input id="researchPeers" placeholder="Peers, e.g. AMD, INTC" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem;width:150px">
         <select id="researchHorizon">
@@ -680,6 +681,9 @@
           <option value="5y">5-year horizon</option>
         </select>
         <textarea id="researchThesis" rows="4" maxlength="2000" placeholder="Your thesis, e.g. 'AI data-centre demand doubles SiC revenue by 2028 and margins turn positive'" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.8rem;font-family:inherit;width:100%;box-sizing:border-box;resize:vertical"></textarea>
+        <span id="researchDates" style="display:none;gap:4px;align-items:center;flex-wrap:wrap">
+          <input type="date" id="researchStart" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark"> <span class="research-muted">to</span> <input type="date" id="researchEnd" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark">
+        </span>
         <button id="researchOpenBtn">Open report</button>
       </div>
     </div>
@@ -1994,6 +1998,22 @@ function currentResearchSymbol() {
   return window._lastData && window._lastData.meta && window._lastData.meta.symbol;
 }
 
+// Local-calendar YYYY-MM-DD (toISOString would shift the day for UTC+ users).
+function isoDay(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function defaultNewsRange() {
+  const end = new Date(), start = new Date();
+  start.setDate(start.getDate() - 30);
+  return {start: isoDay(start), end: isoDay(end)};
+}
+(() => {
+  const r = defaultNewsRange();
+  document.getElementById('researchStart').value = r.start;
+  document.getElementById('researchEnd').value = r.end;
+  document.getElementById('researchStart').max = document.getElementById('researchEnd').max = r.end;
+})();
+
 // The loaded symbol plus the typed peers, deduped + sorted to match the
 // server's cache key. Returns null if outside 2-5 tickers.
 function compareTickers(peersText) {
@@ -2016,6 +2036,13 @@ function openResearch(report, horizon, peersText) {
     if (!list) { _researchToken++; return researchMessage('Enter 1–4 peer tickers to compare with ' + esc(sym) + ', separated by commas (2–5 companies in total).'); }
     document.getElementById('researchTitle').textContent = `🔬 Peer Comparison — ${list.join(' vs ')}`;
     return startResearch({symbol: list.join(','), report, horizon: '3y'}, ++_researchToken);
+  }
+  if (report === 'news') {
+    const r = peersText || {};
+    document.getElementById('researchTitle').textContent = `🔬 ${sym} — News & Catalysts`;
+    if (!r.start || !r.end || r.start > r.end) { _researchToken++; return researchMessage('Pick a start date on or before the end date.'); }
+    document.getElementById('researchTitle').textContent = `🔬 ${sym} — News & Catalysts · ${r.start} to ${r.end}`;
+    return startResearch({symbol: sym, report, horizon: '3y', start: r.start, end: r.end}, ++_researchToken);
   }
   if (report === 'thesis') {
     const text = String(peersText || '').trim();
@@ -2040,12 +2067,13 @@ document.getElementById('researchType').addEventListener('change', e => {
   document.getElementById('researchHorizon').style.display = ['business', 'value'].includes(e.target.value) ? '' : 'none';
   document.getElementById('researchPeers').style.display = e.target.value === 'compare' ? '' : 'none';
   document.getElementById('researchThesis').style.display = e.target.value === 'thesis' ? '' : 'none';
+  document.getElementById('researchDates').style.display = e.target.value === 'news' ? 'inline-flex' : 'none';
 });
 document.getElementById('researchOpenBtn').addEventListener('click', () =>
   openResearch(document.getElementById('researchType').value, document.getElementById('researchHorizon').value,
-               document.getElementById('researchType').value === 'thesis'
-                 ? document.getElementById('researchThesis').value
-                 : document.getElementById('researchPeers').value));
+               {thesis: document.getElementById('researchThesis').value,
+                news: {start: document.getElementById('researchStart').value, end: document.getElementById('researchEnd').value},
+               }[document.getElementById('researchType').value] ?? document.getElementById('researchPeers').value));
 
 // Top-bar entry point: always opens the Research window, so it is never a
 // silent no-op. Logged-out visitors get told why and offered the login;
@@ -2078,10 +2106,19 @@ document.getElementById('researchBtn').addEventListener('click', () => {
         <input id="researchPickPeers" placeholder="Peers, e.g. AMD, INTC" style="flex:1;min-width:0;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.82rem">
         <button id="researchPickCmp" style="${btn}">Compare</button>
       </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="date" id="researchPickStart" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark"><span class="research-muted">to</span><input type="date" id="researchPickEnd" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark">
+        <button id="researchPickNews" style="${btn};flex:1">News &amp; catalysts</button>
+      </div>
       <textarea id="researchPickThesis" rows="3" maxlength="2000" placeholder="Your thesis for ${esc(sym)} — what you believe and why" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.8rem;font-family:inherit;width:100%;box-sizing:border-box;resize:vertical"></textarea>
       <button id="researchPickThesisBtn" style="${btn}">Challenge my thesis — 5 strongest objections</button>
       <div class="research-muted" style="text-align:center">First run takes 1–3 minutes; after that it opens instantly for a week.</div>
     </div>`);
+  const nr = defaultNewsRange();
+  Object.assign(document.getElementById('researchPickStart'), {value: nr.start, max: nr.end});
+  Object.assign(document.getElementById('researchPickEnd'), {value: nr.end, max: nr.end});
+  document.getElementById('researchPickNews').addEventListener('click', () =>
+    openResearch('news', '3y', {start: document.getElementById('researchPickStart').value, end: document.getElementById('researchPickEnd').value}));
   document.getElementById('researchPickThesisBtn').addEventListener('click', () =>
     openResearch('thesis', '3y', document.getElementById('researchPickThesis').value));
   document.getElementById('researchPickCmp').addEventListener('click', () =>
@@ -2128,7 +2165,7 @@ function handleResearch(req, token, data, polls) {
   if (token !== _researchToken) return;   // modal closed or reopened
   const s = data.status;
   if (s === 'ready') {
-    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare, value: renderValue, thesis: renderThesis}[req.report] || renderResearch;
+    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare, value: renderValue, thesis: renderThesis, news: renderNewsReport}[req.report] || renderResearch;
     return render(data.report, data.generated_at);
   }
   if (s === 'capped')      return researchMessage("Today's limit for new research reports has been reached. Reports already generated this week still open instantly — try again tomorrow for this one.");
@@ -2147,7 +2184,8 @@ function handleResearch(req, token, data, polls) {
                 earnings: 'the earnings release, quarterly filing and call transcript',
                 compare: "each company's filings and current valuation data",
                 value: 'filings, share count and discount-rate inputs, then building the scenarios',
-                thesis: 'filings, competitor disclosures and industry data for the strongest objections'}[req.report]
+                thesis: 'filings, competitor disclosures and industry data for the strongest objections',
+                news: 'press releases, filings and financial news for the period'}[req.report]
                || 'recent filings, earnings calls and news';
   researchMessage(`<div class="research-spinner"></div>Researching ${esc(req.symbol)} — reading ${what}…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
   setTimeout(async () => {
@@ -2279,6 +2317,49 @@ function renderEarnings(r, generatedAt) {
   html += `<h4>3 Critical Questions Before Drawing Conclusions</h4><ol>${
     (r.questions || []).map(q => `<li>${esc(q)}</li>`).join('')}</ol>`;
 
+  html += researchSources(r.sources);
+  document.getElementById('researchBody').innerHTML = html;
+}
+
+function renderNewsReport(r, generatedAt) {
+  const cite = makeCite(r.sources);
+  const when = generatedAt ? new Date(generatedAt).toLocaleString() : '';
+  const rg = r.range || {};
+  const chip = (txt, c) => `<span class="research-kind" style="color:${c};border-color:${c};background:${c}22">${esc(txt)}</span>`;
+  const statusC = {Confirmed: '#3fb950', Reported: '#e3b341', Speculation: '#f85149'};
+  const impactC = {High: '#f85149', Medium: '#e3b341', Low: '#8b949e'};
+  const typeShort = {'Company announcement': 'Company', 'Regulatory filing': 'Filing', 'Financial press': 'Press', 'Industry / other': 'Other'};
+
+  let html = `<div class="research-muted" style="margin-bottom:10px">${esc(r.company)} · ${esc(rg.start)} to ${esc(rg.end)}${when ? ' · generated ' + esc(when) : ''}</div>`;
+  html += `<h4>What Changed</h4><div>${esc(r.summary)}</div>`;
+
+  const tl = r.timeline || [];
+  html += `<h4>Timeline (${tl.length} event${tl.length === 1 ? '' : 's'})</h4>`;
+  html += '<div class="research-muted" style="margin-bottom:6px">Confirmed = company, filing or official body · Reported = credible press, not confirmed · Speculation = opinion, rumour, unnamed sources.</div>';
+  html += tl.length ? researchTable(['Event / published', 'What happened', 'Source', 'Impact & timing', 'Possible bull / bear'],
+    tl.map(x => {
+      const bi = x.business_impact || {};
+      return [
+        `<span style="font-family:monospace">${esc(x.event_date)}</span><div class="research-muted">pub. ${esc(x.published)}</div>`,
+        `<strong>${esc(x.headline)}</strong> ${chip(x.status || '?', statusC[x.status] || '#8b949e')}<div style="margin-top:4px">${esc(x.what_happened)}</div>`,
+        `${esc(x.source_name)}${cite(x.source)}<div class="research-muted">${esc(typeShort[x.source_type] || x.source_type)}${
+          x.duplicates_merged ? ` · +${esc(x.duplicates_merged)} duplicate${x.duplicates_merged > 1 ? 's' : ''} merged` : ''}</div>`,
+        `${chip(bi.level || '—', impactC[bi.level] || '#8b949e')}<div style="margin-top:4px">${esc(bi.explanation)}</div><div class="research-muted">When: ${esc(x.impact_timing)}</div>`,
+        `<div><span style="color:#3fb950">▲</span> ${esc(x.bullish)}</div><div style="margin-top:4px"><span style="color:#f85149">▼</span> ${esc(x.bearish)}</div>`,
+      ];
+    })) : '<div class="research-muted">No material news found in this period.</div>';
+
+  const cats = r.catalysts || [];
+  if (cats.length) html += '<h4>Upcoming Catalysts</h4>' + researchTable(['Date', 'Type', 'Event', 'Why it matters', 'Possible bull / bear'],
+    cats.map(c => [
+      `<span style="font-family:monospace">${esc(c.date)}</span><div>${chip(c.date_status || '?', c.date_status === 'Confirmed' ? '#3fb950' : '#e3b341')}</div>`,
+      esc(c.type), `<strong>${esc(c.event)}</strong>${cite(c.source)}`, esc(c.why_it_matters),
+      `<div><span style="color:#3fb950">▲</span> ${esc(c.bullish)}</div><div style="margin-top:4px"><span style="color:#f85149">▼</span> ${esc(c.bearish)}</div>`,
+    ]));
+
+  if (r.excluded) html += `<div class="research-muted" style="margin-top:8px"><strong>Left out:</strong> ${esc(r.excluded)}</div>`;
+  if ((r.checks || []).length) html += `<h4>Server Checks</h4><ul>${r.checks.map(c => `<li>${esc(c)}</li>`).join('')}</ul>`;
+  html += '<div class="research-muted" style="margin-top:10px">Bull and bear points are possibilities, not predictions. No event guarantees a particular share-price move.</div>';
   html += researchSources(r.sources);
   document.getElementById('researchBody').innerHTML = html;
 }
