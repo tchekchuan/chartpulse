@@ -236,7 +236,6 @@
     /* Equity Research modal */
     #researchBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
     #researchBtn:hover{border-color:#a78bfa;color:#a78bfa}
-    #researchPanel.flash{border-color:#a78bfa;box-shadow:0 0 0 2px #a78bfa55;transition:box-shadow .3s}
     #researchType,#researchHorizon{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem}
     #researchOpenBtn{background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:6px 12px;font-size:.8rem;font-weight:600;cursor:pointer}
     #researchOpenBtn:hover{background:#388bfd}
@@ -1983,15 +1982,18 @@ const RESEARCH_POLL_MS  = 6000;
 const RESEARCH_MAX_POLL = 60;     // ~6 min, well past a normal 1-3 min run
 let _researchToken = 0;           // bumped on open/close so stale polls stop
 
-function openResearch() {
-  const sym = window._lastData && window._lastData.meta && window._lastData.meta.symbol;
+const HORIZON_LABELS = {'1y': '1-year horizon', '3y': '3-year horizon', '5y': '5-year horizon'};
+
+function currentResearchSymbol() {
+  return window._lastData && window._lastData.meta && window._lastData.meta.symbol;
+}
+
+// report: 'business' | 'financial'; horizon only matters for 'business'.
+function openResearch(report, horizon) {
+  const sym = currentResearchSymbol();
   if (!sym) return;
-  const typeSel = document.getElementById('researchType');
-  const hzSel   = document.getElementById('researchHorizon');
-  const req = {symbol: sym, report: typeSel.value, horizon: hzSel.value};
-  const label = req.report === 'financial'
-    ? 'Financial Strength'
-    : `Business & Risks · ${hzSel.selectedOptions[0].textContent}`;
+  const req = {symbol: sym, report, horizon};
+  const label = report === 'financial' ? 'Financial Strength' : `Business & Risks · ${HORIZON_LABELS[horizon]}`;
   document.getElementById('researchTitle').textContent = `🔬 ${sym} — ${label}`;
   document.getElementById('researchOverlay').style.display = 'flex';
   startResearch(req, ++_researchToken);
@@ -2005,18 +2007,39 @@ function closeResearch() {
 document.getElementById('researchType').addEventListener('change', e => {
   document.getElementById('researchHorizon').style.display = e.target.value === 'financial' ? 'none' : '';
 });
-document.getElementById('researchOpenBtn').addEventListener('click', openResearch);
+document.getElementById('researchOpenBtn').addEventListener('click', () =>
+  openResearch(document.getElementById('researchType').value, document.getElementById('researchHorizon').value));
 
-// Top-bar entry point. The report controls live in the sidebar panel
-// (they apply to the loaded symbol), so this sends logged-out visitors
-// to the login box and everyone else straight to that panel.
+// Top-bar entry point: always opens the Research window, so it is never a
+// silent no-op. Logged-out visitors get told why and offered the login;
+// logged-in users pick a report for the loaded symbol right there.
 document.getElementById('researchBtn').addEventListener('click', () => {
-  if (!_currentUserEmail) { openMyPortfolio(); return; }
-  const panel = document.getElementById('researchPanel');
-  panel.style.display = '';
-  panel.scrollIntoView({behavior: 'smooth', block: 'center'});
-  panel.classList.add('flash');
-  setTimeout(() => panel.classList.remove('flash'), 1600);
+  _researchToken++;
+  document.getElementById('researchTitle').textContent = '🔬 Equity Research';
+  document.getElementById('researchOverlay').style.display = 'flex';
+  const sym = currentResearchSymbol();
+  const btn = 'background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:7px 14px;cursor:pointer;font-size:.85rem';
+  if (!_currentUserEmail) {
+    researchMessage(`Research reports are for logged-in subscribers.<br><br>
+      <button id="researchLogin" style="${btn}">Log in with your email</button>`);
+    document.getElementById('researchLogin').addEventListener('click', () => { closeResearch(); openMyPortfolio(); });
+    return;
+  }
+  if (!sym) return researchMessage('Load a symbol first (type a ticker and press Load), then open Research.');
+  researchMessage(`<div style="font-size:1.05rem;color:#c9d1d9;margin-bottom:14px">Reports for <strong style="color:#58a6ff">${esc(sym)}</strong></div>
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:360px;margin:0 auto;text-align:left">
+      <div style="display:flex;gap:6px;align-items:center">
+        <select id="researchPickHorizon" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.82rem">
+          <option value="1y">1-year</option><option value="3y" selected>3-year</option><option value="5y">5-year</option>
+        </select>
+        <button id="researchPickBiz" style="${btn};flex:1">Business &amp; risks report</button>
+      </div>
+      <button id="researchPickFin" style="${btn}">Financial strength report</button>
+      <div class="research-muted" style="text-align:center">First run takes 1–3 minutes; after that it opens instantly for a week.</div>
+    </div>`);
+  document.getElementById('researchPickBiz').addEventListener('click', () =>
+    openResearch('business', document.getElementById('researchPickHorizon').value));
+  document.getElementById('researchPickFin').addEventListener('click', () => openResearch('financial', '3y'));
 });
 document.getElementById('researchClose').addEventListener('click', closeResearch);
 document.getElementById('researchOverlay').addEventListener('click', e => {
