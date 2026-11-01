@@ -535,6 +535,14 @@
       <h2>📈 Track Record — Does This Tool's Signal Actually Work?</h2>
       <button id="trackClose">✕ Close</button>
     </div>
+    <div style="margin:10px 18px 0;border:1px solid #f85149;background:#f8514918;border-radius:8px;padding:10px 12px;font-size:.8rem;line-height:1.5;color:#c9d1d9">
+      <strong style="color:#f85149">⚠ Correction notice (2 Nov 2026): the figures below overstate real results.</strong>
+      A re-test found three flaws in how outcomes were scored: some outcomes used price moves from before the signal was issued;
+      a "win" was counted even when the price never traded down to the entry price; and repeat signals on the same stock were counted as separate trades.
+      Re-testing 26 independent signals without those flaws, buying at the next session's open after each alert:
+      <strong>STRONG BUY ≈ 79% hit target, but average return ≈ +0.2% per trade; BUY ≈ 40% and ≈ −3.6%</strong>, before fees.
+      That is no demonstrated edge. A corrected track record is being rebuilt. Do not rely on the win rates below.
+    </div>
     <div id="trackMethodology">
       A signal is logged the moment a symbol newly reaches STRONG BUY (any symbol) or newly crosses into a BUY zone on a held portfolio position — the same instant a real alert fires. Outcome: <strong>WIN</strong> if price hits the target before the stop; <strong>LOSS</strong> if the stop is hit first; <strong>EXPIRED</strong> after 30 days if neither is hit, classified by whether price finished above or below entry. Forward-looking only — no historical backfill, no cherry-picking. Not financial advice.
     </div>
