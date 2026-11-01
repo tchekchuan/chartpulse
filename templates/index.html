@@ -248,6 +248,8 @@
     .track-stat{text-align:center}
     .track-stat-val{font-size:1.6rem;font-weight:800}
     .track-stat-lbl{font-size:.68rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em}
+    .track-block{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 12px;flex:1 1 280px}
+    .track-block-h{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:#c9d1d9;margin-bottom:6px;font-weight:700}
     .track-outcome{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
 
     /* Equity Research modal */
@@ -535,16 +537,21 @@
       <h2>📈 Track Record — Does This Tool's Signal Actually Work?</h2>
       <button id="trackClose">✕ Close</button>
     </div>
-    <div style="margin:10px 18px 0;border:1px solid #f85149;background:#f8514918;border-radius:8px;padding:10px 12px;font-size:.8rem;line-height:1.5;color:#c9d1d9">
-      <strong style="color:#f85149">⚠ Correction notice (2 Nov 2026): the figures below overstate real results.</strong>
-      A re-test found three flaws in how outcomes were scored: some outcomes used price moves from before the signal was issued;
-      a "win" was counted even when the price never traded down to the entry price; and repeat signals on the same stock were counted as separate trades.
-      Re-testing 26 independent signals without those flaws, buying at the next session's open after each alert:
-      <strong>STRONG BUY ≈ 79% hit target, but average return ≈ +0.2% per trade; BUY ≈ 40% and ≈ −3.6%</strong>, before fees.
-      That is no demonstrated edge. A corrected track record is being rebuilt. Do not rely on the win rates below.
-    </div>
     <div id="trackMethodology">
-      A signal is logged the moment a symbol newly reaches STRONG BUY (any symbol) or newly crosses into a BUY zone on a held portfolio position — the same instant a real alert fires. Outcome: <strong>WIN</strong> if price hits the target before the stop; <strong>LOSS</strong> if the stop is hit first; <strong>EXPIRED</strong> after 30 days if neither is hit, classified by whether price finished above or below entry. Forward-looking only — no historical backfill, no cherry-picking. Not financial advice.
+      <div style="border:1px solid #e3b341;background:#e3b34114;border-radius:8px;padding:8px 10px;margin-bottom:8px;color:#c9d1d9">
+        <strong style="color:#e3b341">Corrected 2 Nov 2026.</strong> The previous version of this page overstated results
+        (it used price moves from before some signals, counted "wins" where the entry price was never reached, and counted repeat
+        signals as separate trades). Every signal has been re-scored with the method below; the old figures are shown in grey
+        for transparency only.
+      </div>
+      <strong>How each signal is scored:</strong> a signal is logged when a symbol newly reaches STRONG BUY, or a held position
+      newly enters a BUY zone. <strong>Entry</strong> = the opening price of the first trading session after the day the signal
+      was logged (so no price from before the alert is ever used; sometimes a day later than you could have bought).
+      <strong>Exit</strong> = the signal's stop or target, whichever is reached first; a gap through either exits at the open;
+      if both are touched on the same day it counts as the stop (daily prices can't show which came first); after
+      30 days, the last close. If the entry open is already beyond the stop or target the setup is <em>skipped</em>.
+      Only one trade per stock at a time — repeat signals while a trade is open are excluded. Returns are before fees,
+      slippage and tax. Not financial advice.
     </div>
     <div id="trackBody">
       <div id="trackStatus">Loading…</div>
@@ -1900,54 +1907,84 @@ async function loadTrackRecord() {
 function renderTrackRecord(data) {
   const stats   = document.getElementById('trackStats');
   const results = document.getElementById('trackResults');
+  const pct = (v, d = 2) => v == null ? '—' : `${v > 0 ? '+' : ''}${Number(v).toFixed(d)}%`;
+  const col = v => v == null ? '#8b949e' : v > 0 ? '#3fb950' : v < 0 ? '#f85149' : '#8b949e';
 
   if (!data.total) {
     stats.style.display = 'none';
+    results.innerHTML = `<div style="color:#8b949e;text-align:center;padding:30px;font-size:.85rem">No signals logged yet.</div>`;
+    return;
+  }
+  const c = data.counts || {};
+  if (c.not_yet_computed && !c.RESOLVED) {
+    stats.style.display = 'none';
     results.innerHTML = `<div style="color:#8b949e;text-align:center;padding:30px;font-size:.85rem">
-      No signals logged yet — this track record started ${new Date().toISOString().slice(0,10)} and grows
-      forward from here as new STRONG BUY / BUY-zone signals fire on the watchlist and portfolio.
-      Check back after the next scheduled check (8am / 9pm SGT).
-    </div>`;
+      The corrected results are being calculated from price data — this takes a minute after an update. Please reopen shortly.</div>`;
     return;
   }
 
-  const winColor = data.win_rate == null ? '#8b949e' : data.win_rate >= 50 ? '#3fb950' : '#f85149';
-  let statsHtml = `
-    <div class="track-stat"><div class="track-stat-val" style="color:${winColor}">${data.win_rate != null ? data.win_rate.toFixed(1)+'%' : '—'}</div><div class="track-stat-lbl">Win Rate</div></div>
-    <div class="track-stat"><div class="track-stat-val">${data.resolved}</div><div class="track-stat-lbl">Resolved</div></div>
-    <div class="track-stat"><div class="track-stat-val" style="color:#e3b341">${data.pending}</div><div class="track-stat-lbl">Pending</div></div>
-    <div class="track-stat"><div class="track-stat-val">${data.total}</div><div class="track-stat-lbl">Total Signals</div></div>
-  `;
-  ['STRONG BUY','BUY'].forEach(rating => {
-    const b = data.by_rating[rating];
-    if (b && b.resolved) {
-      const c = b.win_rate >= 50 ? '#3fb950' : '#f85149';
-      statsHtml += `<div class="track-stat"><div class="track-stat-val" style="color:${c};font-size:1.1rem">${b.win_rate.toFixed(1)}%</div><div class="track-stat-lbl">${rating} (${b.resolved})</div></div>`;
-    }
-  });
-  stats.innerHTML = statsHtml;
-  stats.style.display = 'flex';
+  const o = data.overall || {trades: 0};
+  const few = (o.trades || 0) < (data.min_trades_for_conclusion || 30);
+  const block = (title, x, legacy) => {
+    if (!x || !x.trades) return `<div class="track-block"><div class="track-block-h">${title}</div><div class="track-stat-lbl">No completed trades yet</div></div>`;
+    return `<div class="track-block">
+      <div class="track-block-h">${title} · ${x.trades} trade${x.trades === 1 ? '' : 's'}</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div class="track-stat"><div class="track-stat-val" style="color:${col(x.avg_return_pct)}">${pct(x.avg_return_pct)}</div><div class="track-stat-lbl">Avg return / trade</div></div>
+        <div class="track-stat"><div class="track-stat-val" style="font-size:1.2rem">${x.profitable_pct.toFixed(0)}%</div><div class="track-stat-lbl">Profitable</div></div>
+        <div class="track-stat"><div class="track-stat-val" style="font-size:1.2rem;color:#3fb950">${pct(x.avg_win_pct)}</div><div class="track-stat-lbl">Avg win</div></div>
+        <div class="track-stat"><div class="track-stat-val" style="font-size:1.2rem;color:#f85149">${pct(x.avg_loss_pct)}</div><div class="track-stat-lbl">Avg loss</div></div>
+        <div class="track-stat"><div class="track-stat-val" style="font-size:1.2rem">${x.profit_factor == null ? '—' : x.profit_factor.toFixed(2)}</div><div class="track-stat-lbl">Profit factor</div></div>
+      </div>
+      <div class="track-stat-lbl" style="margin-top:6px;text-transform:none;letter-spacing:0">
+        ${x.target_hits} target · ${x.stop_hits} stop · ${x.expired} expired · worst ${pct(x.worst_pct)} · best ${pct(x.best_pct)}
+        ${legacy && legacy.resolved ? `<br><span style="color:#6e7681">Old (flawed) method showed ${legacy.win_rate}% win rate, ${pct(legacy.avg_return_pct)} avg on ${legacy.resolved} — not reliable</span>` : ''}
+      </div></div>`;
+  };
 
-  const outcomeColors = {'WIN':'#3fb950','EXPIRED_WIN':'#86efac','LOSS':'#f85149','EXPIRED_LOSS':'#dc2626','PENDING':'#e3b341'};
+  let h = `<div style="width:100%">`;
+  if (few) h += `<div style="border:1px solid #f85149;background:#f8514914;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:.8rem;color:#c9d1d9">
+      <strong style="color:#f85149">Too few trades to conclude anything.</strong> ${o.trades || 0} completed trades so far; at least
+      ${data.min_trades_for_conclusion} are needed before these numbers say much. A small sample can look good or bad by luck.</div>`;
+  h += `<div style="font-size:.78rem;color:#8b949e;margin-bottom:8px">Profit factor = total gains ÷ total losses (above 1 = made money overall).
+     Watch the average loss next to the average win: a high "profitable %" can still lose money if losses are larger.</div>`;
+  h += `<div style="display:flex;gap:12px;flex-wrap:wrap">` + block('All signals', o) +
+       block('STRONG BUY', (data.by_rating || {})['STRONG BUY'], (data.legacy || {})['STRONG BUY']) +
+       block('BUY', (data.by_rating || {})['BUY'], (data.legacy || {})['BUY']) + `</div>`;
+  const e = data.by_entry_rr || {};
+  h += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">` +
+       block('Entry R:R ≥ 1.5 (would be alerted now)', e.rr_ge_1_5) + block('Entry R:R < 1.5 (now: "wait for a better entry")', e.rr_lt_1_5) + `</div>`;
+  h += `<div class="track-stat-lbl" style="margin-top:10px;text-transform:none;letter-spacing:0">
+     ${c.RESOLVED || 0} completed · ${c.PENDING || 0} open · ${c.SKIPPED || 0} skipped (no valid entry) · ${c.DUPLICATE || 0} repeat signals excluded · ${data.total} logged in total</div>`;
+  h += `</div>`;
+  stats.innerHTML = h;
+  stats.style.display = 'block';
+
+  const oc = {WIN: '#3fb950', LOSS: '#f85149', EXPIRED: '#e3b341'};
+  const statusLabel = r => r.v2_status === 'RESOLVED' ? (r.v2_outcome === 'WIN' ? 'TARGET' : r.v2_outcome === 'LOSS' ? 'STOP' : 'EXPIRED')
+    : r.v2_status === 'DUPLICATE' ? 'REPEAT' : r.v2_status || '…';
+  const statusColor = r => r.v2_status === 'RESOLVED' ? (oc[r.v2_outcome] || '#8b949e') : r.v2_status === 'PENDING' ? '#58a6ff' : '#6e7681';
   let html = `<table class="screen-table"><thead><tr>
-    <th>Symbol</th><th>Signal Date</th><th>Rating</th><th>Entry</th><th>Stop</th><th>Target</th>
-    <th>Outcome</th><th>Return</th>
+    <th>Symbol</th><th>Signal</th><th>Rating</th><th>Entry (next open)</th><th>Stop</th><th>Target</th><th>R:R</th>
+    <th>Result</th><th>Return</th><th>Old method</th>
   </tr></thead><tbody>`;
-  data.recent.forEach(r => {
-    const oc = outcomeColors[r.outcome] || '#8b949e';
-    const retColor = (r.return_pct||0) > 0 ? '#3fb950' : (r.return_pct||0) < 0 ? '#f85149' : '#8b949e';
-    html += `<tr class="screen-row" data-sym="${r.symbol}">
-      <td class="screen-sym">${r.symbol}</td>
-      <td style="font-size:.8rem">${r.signal_date}</td>
-      <td style="font-size:.78rem">${r.rating}</td>
-      <td style="font-family:monospace;font-size:.8rem">${r.entry_price != null ? r.entry_price.toFixed(2) : '—'}</td>
+  (data.recent || []).forEach(r => {
+    const dim = r.v2_status === 'DUPLICATE' || r.v2_status === 'SKIPPED' ? 'opacity:.55;' : '';
+    html += `<tr class="screen-row" data-sym="${esc(r.symbol)}" style="${dim}" title="${esc(r.v2_note || '')}">
+      <td class="screen-sym">${esc(r.symbol)}</td>
+      <td style="font-size:.8rem">${esc(r.signal_date)}</td>
+      <td style="font-size:.78rem">${esc(r.rating)}</td>
+      <td style="font-family:monospace;font-size:.8rem">${r.v2_entry != null ? r.v2_entry.toFixed(2) : '—'}<div style="font-size:.66rem;color:#6e7681">${esc(r.v2_entry_date || '')}</div></td>
       <td style="font-family:monospace;font-size:.8rem;color:#f85149">${r.stop_price != null ? r.stop_price.toFixed(2) : '—'}</td>
       <td style="font-family:monospace;font-size:.8rem;color:#3fb950">${r.target_price != null ? r.target_price.toFixed(2) : '—'}</td>
-      <td><span class="track-outcome" style="color:${oc};border-color:${oc};background:${oc}22">${r.outcome}</span></td>
-      <td style="font-family:monospace;font-size:.8rem;color:${retColor}">${r.return_pct != null ? (r.return_pct>0?'+':'')+r.return_pct.toFixed(1)+'%' : '—'}</td>
+      <td style="font-family:monospace;font-size:.8rem">${r.v2_rr != null ? r.v2_rr.toFixed(2) : '—'}</td>
+      <td><span class="track-outcome" style="color:${statusColor(r)};border-color:${statusColor(r)};background:${statusColor(r)}22">${statusLabel(r)}</span>
+          <div style="font-size:.66rem;color:#6e7681">${esc(r.v2_outcome_date || '')}</div></td>
+      <td style="font-family:monospace;font-size:.8rem;color:${col(r.v2_return_pct)}">${r.v2_status === 'RESOLVED' ? pct(r.v2_return_pct, 1) : '—'}</td>
+      <td style="font-size:.7rem;color:#6e7681">${esc(r.outcome)}${r.return_pct != null ? ' ' + pct(r.return_pct, 1) : ''}</td>
     </tr>`;
   });
-  html += '</tbody></table>';
+  html += '</tbody></table><div style="font-size:.7rem;color:#6e7681;padding:8px 12px">Hover a row for how it was scored. Faded rows are repeats or skipped setups and are not counted.</div>';
   results.innerHTML = html;
 
   results.querySelectorAll('.screen-row').forEach(row => {

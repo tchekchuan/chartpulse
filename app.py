@@ -1112,6 +1112,11 @@ def news_sentiment(articles):
 # with how these are actually meant to be traded.
 SENTIMENT_DRIVEN_SYMBOLS = {"BBAI", "DJT"}
 
+# Minimum reward-to-risk, measured from the current price, for the site to
+# treat a BUY-side rating as an actionable entry (and for alerts to fire).
+ENTRY_RR_MIN = 1.5
+
+
 def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patterns):
     """
     Produces a professional analyst rating (Strong Buy → Strong Sell),
@@ -1140,9 +1145,9 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
 
     # ── Adam Khoo: RSI zone ───────────────────────────────────────────────────
     if stg == 2 and 30 <= rsi <= 50:
-        score += 2; reasons.append(f"RSI {rsi:.0f} — healthy pullback within uptrend (ideal entry)")
+        score += 2; reasons.append(f"RSI {rsi:.0f} — pullback within an uptrend (this strategy's preferred entry condition)")
     elif rsi <= 30:
-        score += 1; reasons.append(f"RSI {rsi:.0f} — oversold, high-probability bounce zone")
+        score += 1; reasons.append(f"RSI {rsi:.0f} — oversold (bounces are common from here, but not reliable on their own)")
     elif rsi >= 70:
         score -= 1; reasons.append(f"RSI {rsi:.0f} — overbought, reduce position or wait for pullback")
     elif rsi >= 55 and stg == 2:
@@ -1199,7 +1204,7 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
     # ── Colin Seow: Candlestick confirmation ─────────────────────────────────
     for p in patterns[:1]:
         if p["type"] == "bullish":
-            score += 1; reasons.append(f"Pattern: {p['name']} — bullish reversal confirms entry")
+            score += 1; reasons.append(f"Pattern: {p['name']} — bullish reversal pattern on the latest candle (supporting, not proof)")
         elif p["type"] == "bearish":
             score -= 1; reasons.append(f"Pattern: {p['name']} — bearish signal warns of reversal")
 
@@ -1258,9 +1263,9 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
 
     # RSI situation
     if stg == 2 and 30 <= rsi <= 50:
-        verdict_parts.append(f"RSI {rsi:.0f} signals a pullback within the uptrend — Adam Khoo's ideal low-risk entry window.")
+        verdict_parts.append(f"RSI {rsi:.0f} signals a pullback within the uptrend — the entry condition this strategy prefers.")
     elif rsi <= 30:
-        verdict_parts.append(f"RSI {rsi:.0f} is deeply oversold — historically this is a high-probability bounce zone.")
+        verdict_parts.append(f"RSI {rsi:.0f} is deeply oversold — bounces often follow, but an oversold reading alone is not a reliable signal.")
     elif rsi >= 70:
         verdict_parts.append(f"RSI {rsi:.0f} is overbought — chasing here increases risk; wait for a pullback to support.")
 
@@ -1293,25 +1298,55 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
         )
 
     # The rating is a points score over trend / momentum / news /
-    # fundamentals / pattern; the best zone's reward:risk is NOT part of it
-    # (changing that would change what the published Track Record measures).
-    # So when the setup itself is poor, say so instead of calling it
-    # "high-probability" -- a STRONG BUY with a 0.8:1 entry read as a
-    # contradiction.
-    best_rr = best_buy.get("rr") if best_buy else None
-    poor_rr = best_rr is not None and best_rr < 1
-    if poor_rr:
-        reasons.insert(0, f"⚠ Best entry R:R only {best_rr:.1f}:1 — target is closer than the stop")
+    # fundamentals / pattern and describes the STOCK's condition. Whether
+    # there is a sensible ENTRY right now is a separate question: the
+    # reward-to-risk from the current price (what you'd actually pay) to the
+    # best buy zone's target and stop. Below ENTRY_RR_MIN the site says
+    # "wait for a better entry" and alerts.py does not send a buy alert.
+    # The score itself is unchanged, so the rating means what it always did.
+    target_ = best_buy.get("target") if best_buy else None
+    stop_   = best_buy.get("stop") if best_buy else None
+    rr_now  = None
+    entry_status = "no_setup"
+    if target_ and stop_ and price:
+        if price <= stop_:
+            entry_status = "below_stop"
+        elif price >= target_:
+            entry_status = "above_target"
+        else:
+            rr_now = (target_ - price) / (price - stop_)
+            entry_status = "ok" if rr_now >= ENTRY_RR_MIN else "poor"
+    entry_ok = entry_status == "ok"
 
-    # Closing
-    if rating in ("STRONG BUY", "BUY") and poor_rr:
+    if rating in ("STRONG BUY", "BUY", "MILD BUY"):
+        if entry_status == "poor":
+            reasons.insert(0, f"⚠ Entry from {price:.2f}: R:R {rr_now:.1f}:1 (target {target_:.2f}, stop {stop_:.2f}) "
+                              f"— below {ENTRY_RR_MIN:.1f}:1, wait for a better entry")
+        elif entry_status == "below_stop":
+            reasons.insert(0, f"⚠ Price {price:.2f} is already below the setup's stop ({stop_:.2f}) — no valid entry")
+        elif entry_status == "above_target":
+            reasons.insert(0, f"⚠ Price {price:.2f} is already above the setup's target ({target_:.2f}) — no valid entry")
+        elif entry_status == "no_setup":
+            reasons.insert(0, "⚠ No buy zone with a stop and target — no defined entry")
+
+    # Closing. No probability claims: the corrected Track Record has not
+    # shown a reliable edge (2026-11-02), so the site must not imply one.
+    if rating in ("STRONG BUY", "BUY") and entry_ok:
         verdict_parts.append(
-            f"Overall: the trend and fundamentals score well, but the best entry offers only {best_rr:.1f}:1 "
-            "reward-to-risk — the rating describes the stock's condition, not this entry. A better entry "
-            "would be lower, or wait for a breakout to set a higher target."
+            f"Overall: conditions score well and the entry from the current price offers {rr_now:.1f}:1 "
+            f"reward-to-risk (target {target_:.2f}, stop {stop_:.2f}). That is a valid setup by this site's rules, "
+            "not a prediction — past signals have not yet shown a reliable edge (see Track Record). "
+            "Size the position so the loss at the stop is one you can accept."
         )
     elif rating in ("STRONG BUY", "BUY"):
-        verdict_parts.append("Overall: high-probability long setup — manage risk with defined stop loss.")
+        why = {"poor": f"the entry from the current price offers only {rr_now:.1f}:1 reward-to-risk" if rr_now is not None else "",
+               "below_stop": "price is already below the setup's stop",
+               "above_target": "price is already above the setup's target",
+               "no_setup": "there is no buy zone with a defined stop and target"}[entry_status]
+        verdict_parts.append(
+            f"Overall: the stock's conditions score well, but {why} — the rating describes the stock, not this entry. "
+            "Wait for a pullback toward the buy zone or a new setup."
+        )
     elif rating in ("STRONG SELL", "SELL"):
         verdict_parts.append("Overall: avoid long positions; existing holders should consider reducing exposure.")
     else:
@@ -1329,8 +1364,10 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
         "best_sell_price": best_sell.get("price") if best_sell else None,
         "suggested_position_pct": suggested_position_pct,
         "risk_per_trade_pct":     RISK_PER_TRADE_PCT,
-        "best_rr":  best_rr,
-        "poor_rr":  poor_rr,
+        "rr_now":       round(rr_now, 2) if rr_now is not None else None,
+        "entry_status": entry_status,
+        "entry_ok":     entry_ok,
+        "entry_rr_min": ENTRY_RR_MIN,
     }
 
 
@@ -1818,6 +1855,9 @@ def _analyze_symbol_uncached(sym, period, interval):
             "target":      arating.get("target"),
             "stop":        arating.get("stop"),
             "rr":          best_buy.get("rr", 0) if best_buy else 0,
+            "rr_now":       arating.get("rr_now"),
+            "entry_status": arating.get("entry_status"),
+            "entry_ok":     arating.get("entry_ok"),
             "stars":       best_buy.get("stars", 0) if best_buy else 0,
             "suggested_position_pct": arating.get("suggested_position_pct"),
             "risk_per_trade_pct":     arating.get("risk_per_trade_pct"),
@@ -2403,6 +2443,11 @@ import swing_data      # noqa: E402
 subscribers.init_db()
 ark_tracker.init_db()
 track_record.init_db()
+# Compute the corrected record once at boot (in the background -- it
+# fetches price history) so the page is correct right after a deploy,
+# not only after the next 8am/9pm alert cycle.
+threading.Thread(target=lambda: print(f"track_record: corrected record computed for {track_record.recompute_all()} row(s)"),
+                 daemon=True).start()
 auth.init_db()
 user_holdings.init_db()
 user_watchlist.init_db()

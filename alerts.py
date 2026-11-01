@@ -72,11 +72,26 @@ def send_email(subject, body):
     return _mailer_send_email(ALERT_EMAIL_TO, subject, body)
 
 
+def _entry_text(r):
+    """One honest line about the entry from the current price."""
+    st = r.get("entry_status")
+    if st == "ok":
+        return (f"  Entry from {r['price']:.2f}: R:R {r['rr_now']:.1f}:1 "
+                f"(target {r['target']:.2f}, stop {r['stop']:.2f}) — before fees; not a prediction")
+    if st == "poor":
+        return (f"  Entry from {r['price']:.2f}: R:R only {r['rr_now']:.1f}:1 "
+                f"(target {r['target']:.2f}, stop {r['stop']:.2f}) — wait for a better entry")
+    return {"below_stop": "  Price is already below the setup's stop — no valid entry",
+            "above_target": "  Price is already above the setup's target — no valid entry"}.get(
+        st, "  No buy zone with a stop and target — no defined entry")
+
+
 def _format_line(sym, r, tag, held_tag=""):
     return (
         f"*{sym}*{held_tag}: {tag} — {r['rating']}\n"
         f"  Price {r['price']:.2f} {r['currency']} ({r['change']:+.2f}%)  "
         f"RSI {r['rsi']:.0f}  Stage {r['stage']}\n"
+        f"{_entry_text(r)}\n"
         f"  {r['reason']}"
     )
 
@@ -142,11 +157,20 @@ def check_and_alert():
             is_held_change    = held and action in ("BUY", "SELL") and prev.get("action") != action
 
             if is_new_strong_buy or is_held_change:
-                tag = "⭐ STRONG BUY" if rating == "STRONG BUY" else f"{action} zone"
+                # Entry gate (2026-11-02): a STRONG BUY is only sent as a buy
+                # alert -- and only reaches subscribers -- when the entry from
+                # the current price is >= ENTRY_RR_MIN. Otherwise Shawn is still
+                # told, privately, that the stock rates well but there is no
+                # entry, so nothing is hidden from him.
+                entry_ok = bool(r.get("entry_ok"))
+                if is_new_strong_buy:
+                    tag = "⭐ STRONG BUY" if entry_ok else "⭐ STRONG BUY (stock only — NO buy alert, entry too poor)"
+                else:
+                    tag = f"{action} zone"
                 held_tag = " (held)" if held else ""
                 line = _format_line(sym, r, tag, held_tag)
                 lines.append(line)
-                if is_new_strong_buy:
+                if is_new_strong_buy and entry_ok:
                     strong_buy_lines.append(line)
 
                 # Backtest tracking: log the same moment a signal becomes
@@ -155,9 +179,13 @@ def check_and_alert():
                 # now, sell-zone changes are exit timing, a separate question.
                 if is_new_strong_buy or (is_held_change and action == "BUY"):
                     try:
+                        # Logged whether or not the entry passed the gate, so the
+                        # corrected record can show if the gate actually helps.
                         track_record.log_signal(
                             sym, rating, r.get("score"),
                             r.get("entry"), r.get("stop"), r.get("target"),
+                            price_at_signal=r.get("price"), rr_at_signal=r.get("rr_now"),
+                            entry_ok=r.get("entry_ok"),
                         )
                     except Exception as e:
                         print(f"alerts: track_record.log_signal failed for {sym}: {e}")
@@ -183,7 +211,9 @@ def check_and_alert():
             for email in portfolio_by_symbol[sym]:
                 _add_line(email, line)
 
-        if sym in watchlist_by_symbol and rating == "STRONG BUY" and prior.get("rating") != "STRONG BUY":
+        # Subscribers' watchlists: same entry gate as the public STRONG BUY email.
+        if (sym in watchlist_by_symbol and rating == "STRONG BUY" and prior.get("rating") != "STRONG BUY"
+                and r.get("entry_ok")):
             line = _format_line(sym, r, "⭐ STRONG BUY (your watchlist)")
             for email in watchlist_by_symbol[sym]:
                 _add_line(email, line)
