@@ -670,6 +670,7 @@
           <option value="financial">Financial strength</option>
           <option value="earnings">Earnings review</option>
           <option value="compare">Peer comparison</option>
+          <option value="value">Intrinsic value</option>
         </select>
         <input id="researchPeers" placeholder="Peers, e.g. AMD, INTC" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem;width:150px">
         <select id="researchHorizon">
@@ -2015,7 +2016,8 @@ function openResearch(report, horizon, peersText) {
     return startResearch({symbol: list.join(','), report, horizon: '3y'}, ++_researchToken);
   }
   const req = {symbol: sym, report, horizon};
-  const label = {financial: 'Financial Strength', earnings: 'Earnings Review (latest quarter)'}[report]
+  const label = {financial: 'Financial Strength', earnings: 'Earnings Review (latest quarter)',
+                 value: `Intrinsic Value · ${HORIZON_LABELS[horizon]}`}[report]
     || `Business & Risks · ${HORIZON_LABELS[horizon]}`;
   document.getElementById('researchTitle').textContent = `🔬 ${sym} — ${label}`;
   startResearch(req, ++_researchToken);
@@ -2027,7 +2029,7 @@ function closeResearch() {
 
 document.getElementById('researchType').addEventListener('change', e => {
   // Only the business report takes a horizon.
-  document.getElementById('researchHorizon').style.display = e.target.value === 'business' ? '' : 'none';
+  document.getElementById('researchHorizon').style.display = ['business', 'value'].includes(e.target.value) ? '' : 'none';
   document.getElementById('researchPeers').style.display = e.target.value === 'compare' ? '' : 'none';
 });
 document.getElementById('researchOpenBtn').addEventListener('click', () =>
@@ -2058,6 +2060,7 @@ document.getElementById('researchBtn').addEventListener('click', () => {
         </select>
         <button id="researchPickBiz" style="${btn};flex:1">Business &amp; risks report</button>
       </div>
+      <button id="researchPickVal" style="${btn}">Intrinsic value — bear / base / bull (uses horizon above)</button>
       <button id="researchPickFin" style="${btn}">Financial strength report</button>
       <button id="researchPickEarn" style="${btn}">Earnings review — latest quarter</button>
       <div style="display:flex;gap:6px;align-items:center">
@@ -2070,6 +2073,8 @@ document.getElementById('researchBtn').addEventListener('click', () => {
     openResearch('compare', '3y', document.getElementById('researchPickPeers').value));
   document.getElementById('researchPickBiz').addEventListener('click', () =>
     openResearch('business', document.getElementById('researchPickHorizon').value));
+  document.getElementById('researchPickVal').addEventListener('click', () =>
+    openResearch('value', document.getElementById('researchPickHorizon').value));
   document.getElementById('researchPickFin').addEventListener('click', () => openResearch('financial', '3y'));
   document.getElementById('researchPickEarn').addEventListener('click', () => openResearch('earnings', '3y'));
 });
@@ -2107,11 +2112,12 @@ function handleResearch(req, token, data, polls) {
   if (token !== _researchToken) return;   // modal closed or reopened
   const s = data.status;
   if (s === 'ready') {
-    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare}[req.report] || renderResearch;
+    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare, value: renderValue}[req.report] || renderResearch;
     return render(data.report, data.generated_at);
   }
   if (s === 'capped')      return researchMessage("Today's limit for new research reports has been reached. Reports already generated this week still open instantly — try again tomorrow for this one.");
   if (s === 'unavailable') return researchMessage('Equity Research is not available right now.');
+  if (s === 'no_price')    return researchMessage(`Couldn't get a verified market price for ${esc(req.symbol)} right now, so no valuation was run. Try again in a few minutes.`);
   if (s === 'failed' || s === 'none') {
     researchMessage(`The report for ${esc(req.symbol)} couldn't be generated this time.<br><br>
       <button id="researchRetry" style="background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:6px 14px;cursor:pointer">Try again</button>`);
@@ -2123,7 +2129,8 @@ function handleResearch(req, token, data, polls) {
   const secs = Math.round(polls * RESEARCH_POLL_MS / 1000);
   const what = {financial: 'annual and interim filings, cash-flow statements and peers',
                 earnings: 'the earnings release, quarterly filing and call transcript',
-                compare: "each company's filings and current valuation data"}[req.report]
+                compare: "each company's filings and current valuation data",
+                value: 'filings, share count and discount-rate inputs, then building the scenarios'}[req.report]
                || 'recent filings, earnings calls and news';
   researchMessage(`<div class="research-spinner"></div>Researching ${esc(req.symbol)} — reading ${what}…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
   setTimeout(async () => {
@@ -2254,6 +2261,83 @@ function renderEarnings(r, generatedAt) {
   html += `<h4>3 Critical Questions Before Drawing Conclusions</h4><ol>${
     (r.questions || []).map(q => `<li>${esc(q)}</li>`).join('')}</ol>`;
 
+  html += researchSources(r.sources);
+  document.getElementById('researchBody').innerHTML = html;
+}
+
+function renderValue(r, generatedAt) {
+  const cite = makeCite(r.sources);
+  const when = generatedAt ? new Date(generatedAt).toLocaleDateString() : '';
+  const mp = r.market_price || {};
+  const money = v => (v == null || v === '' || isNaN(v)) ? '—' : Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const pct = v => v == null ? '—' : `${v > 0 ? '+' : ''}${esc(v)}%`;
+  const pctColor = v => v == null ? '#8b949e' : v >= 0 ? '#3fb950' : '#f85149';
+  const priced = mp.priced_at ? new Date(mp.priced_at * 1000).toLocaleString() : '';
+
+  let html = `<div class="research-muted" style="margin-bottom:10px">${esc(r.company)}${
+    r.currency ? ' · ' + esc(r.currency) : ''}${when ? ' · generated ' + esc(when) : ''}</div>`;
+  html += `<div style="border:1px solid #e3b341;background:#e3b34114;border-radius:6px;padding:8px 10px;font-size:.8rem;margin-bottom:10px">
+    These are estimates built on the assumptions shown, not predictions or guaranteed outcomes, and not a recommendation to buy or sell.</div>`;
+
+  html += `<h4>Market Price Used</h4><div><strong style="font-family:monospace;font-size:1rem">${esc(mp.currency)} ${money(mp.price)}</strong>
+    <span class="research-muted"> · ${esc(mp.source)}${priced ? ' · ' + esc(priced) : ''}</span></div>
+    <div class="research-muted">Fixed when the report was generated. The live price may have moved since.</div>`;
+
+  const m = r.method || {};
+  html += `<h4>Method — ${esc(m.name)}</h4><div>${esc(m.why)}</div>`;
+  const b = r.base_year || {};
+  html += researchTable(['Starting point', 'Revenue', 'Op margin', 'FCF', 'Net debt (cash)', 'Diluted shares (M)'],
+    [[`${esc(b.period)}${cite(b.source)}`, esc(b.revenue), esc(b.operating_margin), esc(b.free_cash_flow), esc(b.net_debt), esc(b.diluted_shares_m)]]);
+  const d = r.discount_rate || {};
+  if (d.value) html += `<div style="margin-top:6px"><strong>Discount rate ${esc(d.value)}</strong> — ${esc(d.derivation)}</div>`;
+
+  const sc = r.scenarios || [];
+  const a = (x, k) => esc((x.assumptions || {})[k]);
+  html += '<h4>Scenarios</h4>' + researchTable(['', ...sc.map(x => esc(x.name))], [
+    ['<strong>Value per share</strong>', ...sc.map(x => `<strong style="font-family:monospace;font-size:1rem">${money(x.per_share)}</strong>`)],
+    ['vs market price', ...sc.map(x => `<span style="color:${pctColor(x.vs_price_pct)};font-family:monospace">${pct(x.vs_price_pct)}</span>`)],
+    ['Story', ...sc.map(x => esc(x.summary))],
+    ['Revenue growth', ...sc.map(x => a(x, 'revenue_growth'))],
+    ['Operating margin', ...sc.map(x => a(x, 'operating_margin'))],
+    ['FCF margin / conversion', ...sc.map(x => a(x, 'fcf_margin_or_conversion'))],
+    ['Discount rate', ...sc.map(x => a(x, 'discount_rate'))],
+    ['Terminal value', ...sc.map(x => a(x, 'terminal'))],
+    ['Share count', ...sc.map(x => a(x, 'share_count'))],
+  ]);
+
+  sc.forEach(x => {
+    html += `<details style="margin-top:8px"><summary style="cursor:pointer"><strong>${esc(x.name)} — formula &amp; calculations</strong></summary>
+      <div style="font-family:monospace;font-size:.78rem;margin:6px 0">${esc(x.formula)}</div>
+      <ol style="font-family:monospace;font-size:.75rem">${(x.steps || []).map(st => `<li>${esc(st)}</li>`).join('')}</ol>
+      <div class="research-muted">EV ${esc(x.enterprise_value)} − net debt ${esc(x.net_debt)} = equity ${esc(x.equity_value)} ÷ ${esc(x.diluted_shares_m)}M shares = ${money(x.per_share)} per share${
+        x.per_share_checked ? ' ✓ checked by the site' : ' (could not be re-checked)'}</div></details>`;
+  });
+
+  const s = r.sensitivity || {};
+  if ((s.per_share || []).length) {
+    html += `<h4>Stress Test — ${esc(s.row_assumption)} × ${esc(s.col_assumption)}</h4><div style="margin-bottom:6px">${esc(s.why_these_two)}</div>`;
+    const midR = Math.floor((s.per_share.length - 1) / 2);
+    html += researchTable([`${s.row_assumption} ↓ / ${s.col_assumption} →`, ...(s.col_values || [])],
+      s.per_share.map((row, i) => [`<strong>${esc((s.row_values || [])[i])}</strong>`, ...(row || []).map((v, j) => {
+        const up = mp.price && !isNaN(v) ? Number(v) >= mp.price : null;
+        const base = i === midR && j === Math.floor((row.length - 1) / 2);
+        const style = `font-family:monospace;color:${up == null ? '#c9d1d9' : up ? '#3fb950' : '#f85149'}${base ? ';font-weight:700;text-decoration:underline' : ''}`;
+        return `<span style="${style}">${money(v)}</span>`;
+      })]));
+    html += '<div class="research-muted" style="margin-top:4px">Green = above the market price used, red = below. Underlined = base case.</div>';
+  }
+
+  const mos = r.margin_of_safety_pct;
+  html += `<h4>Margin of Safety${mos != null ? ` <span class="research-kind" style="color:${pctColor(mos)};border-color:${pctColor(mos)};background:${pctColor(mos)}22">${pct(mos)} vs base case</span>` : ''}</h4>
+    <div>${esc(r.margin_of_safety)}</div>
+    <div class="research-muted">Margin of safety = 1 − price ÷ base-case value, calculated by the site, not the model. Negative = the price is above the base case.</div>`;
+
+  const ie = r.implied_expectations || {};
+  html += `<h4>What the Price Already Assumes</h4><div>${esc(ie.summary)}</div>` +
+    researchTable(['Implied revenue growth', 'Implied margin', 'How'], [[esc(ie.implied_growth), esc(ie.implied_margin), esc(ie.method)]]);
+
+  if ((r.checks || []).length) html += `<h4>Server Checks</h4><ul>${r.checks.map(c => `<li>${esc(c)}</li>`).join('')}</ul>`;
+  if ((r.caveats || []).filter(Boolean).length) html += `<h4>Caveats</h4><ul>${r.caveats.filter(Boolean).map(c => `<li>${esc(c)}</li>`).join('')}</ul>`;
   html += researchSources(r.sources);
   document.getElementById('researchBody').innerHTML = html;
 }

@@ -2048,6 +2048,37 @@ def ark_trades_route():
 _RESEARCH_SYMBOL_RE = re.compile(r"^[A-Z0-9.\-^=]{1,15}$")
 
 
+def _valuation_quote(symbol):
+    """Price + timestamp for the intrinsic-value report, same source order
+    as get_stock(): Finnhub live quote for US tickers, else the last daily
+    close from yfinance with that bar's date. None if neither works -- the
+    report then refuses to run rather than value against a guessed price."""
+    if FINNHUB_API_KEY and "." not in symbol:
+        try:
+            fq = _fetch_finnhub_quote(symbol)
+            if fq:
+                return {"price": fq["price"], "currency": "USD",
+                        "priced_at": fq["priced_at"], "source": "Finnhub live quote"}
+        except Exception as e:
+            app.logger.warning(f"_valuation_quote: Finnhub failed for {symbol}: {type(e).__name__}: {e}")
+    try:
+        t = yf.Ticker(symbol)
+        hist = t.history(period="5d", interval="1d")
+        if hist is not None and not hist.empty:
+            close = float(hist["Close"].iloc[-1])
+            if close > 0 and not np.isnan(close):
+                try:
+                    currency = getattr(t.fast_info, "currency", None) or "USD"
+                except Exception:
+                    currency = "USD"
+                return {"price": round(close, 4), "currency": currency,
+                        "priced_at": int(hist.index[-1].timestamp()),
+                        "source": "last daily close (Yahoo Finance)"}
+    except Exception as e:
+        app.logger.warning(f"_valuation_quote: yfinance failed for {symbol}: {type(e).__name__}: {e}")
+    return None
+
+
 def _research_args(src):
     """Validates symbol + report type + horizon for the equity research
     routes. Returns (symbol, report, horizon, None) or
@@ -2095,6 +2126,10 @@ def research_start():
         return err
     # Usually a cache hit -- the user has just loaded this symbol's page.
     # The name keeps the model from confusing tickers shared across exchanges.
+    # A valuation is compared with a price the site itself verified, not
+    # one the model found on the web. If no quote, start() still serves a
+    # cached report but won't generate a new one ("no_price").
+    quote = _valuation_quote(symbol) if report == "value" else None
     # Skipped for a comparison: up to 5 uncached lookups could run past
     # gunicorn's 30s timeout, and the prompt names each ticker anyway.
     name = None
@@ -2103,7 +2138,7 @@ def research_start():
             name = get_fundamentals(yf.Ticker(symbol)).get("name")
         except Exception:
             name = None
-    return jsonify(equity_research.start(symbol, report, horizon, name))
+    return jsonify(equity_research.start(symbol, report, horizon, name, quote))
 
 
 @app.route("/api/track-record")

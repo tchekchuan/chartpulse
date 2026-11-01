@@ -39,6 +39,17 @@
 #       so the same set in any order shares one cache row. Multiples
 #       move with price, so it's cached COMPARE_CACHE_DAYS (default 3).
 #
+#       Fifth report type, "value": intrinsic value over the chosen
+#       horizon -- bear/base/bull scenarios with explicit assumptions,
+#       formulas and per-share values, a 2-way sensitivity grid on the
+#       two most impactful assumptions, margin of safety and the
+#       expectations implied by the price. The market price is NOT
+#       taken from the model: app.py passes in a quote from the site's
+#       own price feed with its timestamp, and _check_value() recomputes
+#       every per-share value and the margin of safety from the model's
+#       own equity value and share count, so arithmetic slips are caught
+#       and corrected rather than shown. Cached VALUE_CACHE_DAYS.
+#
 #       A report takes 1-3 minutes (several web searches), far past
 #       gunicorn's 30s worker timeout on a single sync worker, so it
 #       runs in a background thread and the page polls for it.
@@ -75,7 +86,7 @@ HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
 # `horizon` column is the cache key: "1y"/"3y"/"5y" for a business report,
 # FIN_KEY / EARN_KEY for the financial-strength and earnings reports
 # (neither has a horizon).
-REPORT_TYPES = ("business", "financial", "earnings", "compare")
+REPORT_TYPES = ("business", "financial", "earnings", "compare", "value")
 FIN_KEY = "fin"
 EARN_KEY = "earn"
 CMP_KEY = "cmp"
@@ -86,9 +97,17 @@ EARNINGS_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_EARNINGS_CACHE_DAYS", 
 # Valuation multiples move with the share price, so a comparison goes
 # stale faster than a fundamentals-only report.
 COMPARE_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_COMPARE_CACHE_DAYS", "3"))
+# A valuation is anchored to a price, so it ages as fast as a comparison.
+VALUE_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_VALUE_CACHE_DAYS", "3"))
+VALUE_PREFIX = "iv"   # cache key "iv1y" / "iv3y" / "iv5y"
+# Per-share value the model wrote vs equity value / shares: beyond this
+# relative gap it's treated as an arithmetic slip and replaced.
+VALUE_TOLERANCE = 0.02
 
 
 def cache_key(report, horizon):
+    if report == "value":
+        return VALUE_PREFIX + horizon
     return {"financial": FIN_KEY, "earnings": EARN_KEY, "compare": CMP_KEY}.get(report, horizon)
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
@@ -295,11 +314,133 @@ def parse_tickers(raw):
     return tickers if COMPARE_MIN <= len(tickers) <= COMPARE_MAX else None
 
 
+VALUE_SHAPE = """{
+  "company": "full company name",
+  "currency": "currency and unit for the money figures, e.g. 'USD millions'",
+  "method": {"name": "e.g. 'FCF DCF + exit multiple cross-check'", "why": "why this method fits this company"},
+  "base_year": {"period": "latest TTM or fiscal year used as the starting point",
+                "revenue": "", "operating_margin": "", "free_cash_flow": "",
+                "net_debt": "net debt (positive) or net cash (negative), with date",
+                "diluted_shares_m": 0, "source": 1},
+  "discount_rate": {"value": "e.g. '10.5%'", "derivation": "risk-free + beta x ERP (+ premium), or cost of equity -- show the numbers"},
+  "scenarios": [
+    {"name": "Bear", "summary": "one-sentence story",
+     "assumptions": {"revenue_growth": "per-year path or CAGR", "operating_margin": "", "fcf_margin_or_conversion": "",
+                     "discount_rate": "", "terminal": "terminal growth or exit multiple, say which", "share_count": "annual change and why"},
+     "formula": "the valuation formula in plain text",
+     "steps": ["each calculation line with numbers, e.g. 'FCF 2029 = 1,200 x 18% = 216'"],
+     "enterprise_value": 0, "net_debt": 0, "equity_value": 0, "diluted_shares_m": 0, "per_share": 0},
+    "... then Base and Bull in the same shape"
+  ],
+  "sensitivity": {"why_these_two": "why these assumptions move the value most",
+                  "row_assumption": "", "row_values": ["", "", "", "", ""],
+                  "col_assumption": "", "col_values": ["", "", "", "", ""],
+                  "per_share": [[0, 0, 0, 0, 0]]},
+  "margin_of_safety": "what margin of safety the base case offers (or not) and why that size is or isn't adequate for this company's risk",
+  "implied_expectations": {"summary": "what the current price already assumes",
+                           "implied_growth": "", "implied_margin": "", "method": "how you reverse-engineered it"},
+  "caveats": [""],
+  "sources": [{"id": 1, "title": "", "url": ""}]
+}"""
+
+
+def _value_prompt(who, label, quote):
+    when = datetime.fromtimestamp(quote["priced_at"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return (
+        f"Estimate the intrinsic value of {who} per share today, using a {label} explicit "
+        "forecast period, with an appropriate valuation method (FCF DCF for most companies; "
+        "residual income / P/B for banks and insurers; NAV for REITs; for a loss-making or "
+        "turnaround company, model the path to positive FCF and say plainly how much of the "
+        "value sits in the terminal value). Build bear, base, and bull scenarios with explicit "
+        "assumptions for revenue growth, margins, cash flow, discount rate, terminal value or "
+        "exit multiple, and share count (dilution from SBC, converts, warrants, or buybacks). "
+        "Show the formulas and the calculation steps with numbers, ending at an equity value "
+        "and an implied per-share value.\n\n"
+        f"The latest verified market price is {quote['currency']} {quote['price']:,.2f} "
+        f"({quote['source']}, {when}). Use exactly this price -- do not search for another. "
+        "Stress-test the two assumptions with the greatest impact on value as a 5x5 grid of "
+        "per-share values around the base case (middle cell = base case). Explain the margin of "
+        "safety, and reverse-engineer what revenue growth and margins the current price already "
+        "implies.\n\n"
+        "Get the starting figures (revenue, margins, FCF, net debt, diluted shares including "
+        "convertibles and options) from the latest filings; cite them. Money figures in "
+        "enterprise_value, net_debt and equity_value are plain numbers in the currency/unit you "
+        "state; diluted_shares_m is millions of shares; per_share = equity_value / "
+        "diluted_shares_m converted to the price's units. Order scenarios Bear, Base, Bull. "
+        "These are estimates under stated assumptions, not predictions or recommendations: no "
+        "buy/sell rating, no price target language.\n\n"
+        "Your final message must be ONLY a JSON object (no markdown fences, no other "
+        f"text) in exactly this shape:\n{VALUE_SHAPE}"
+    )
+
+
+def _num(v):
+    """Model numbers sometimes arrive as '1,234.5' strings."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).replace(",", "").replace("$", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _unit_scale(currency_unit):
+    """How many currency units one money figure stands for, from e.g.
+    'USD millions' -> 1e6. Shares are always in millions."""
+    u = (currency_unit or "").lower()
+    for word, scale in (("trillion", 1e12), ("billion", 1e9), ("million", 1e6), ("thousand", 1e3)):
+        if word in u:
+            return scale
+    if " bn" in u or u.endswith("bn"):
+        return 1e9
+    if " mn" in u or u.endswith(" m") or " mm" in u:
+        return 1e6
+    return 1.0
+
+
+def _check_value(report, quote):
+    """Recomputes per-share value and margin of safety on the server.
+    The model's per_share is kept only if it matches equity value / shares
+    within VALUE_TOLERANCE; otherwise it's replaced and the fix recorded,
+    so a slipped decimal never reaches the page as a number."""
+    report["market_price"] = {k: quote[k] for k in ("price", "currency", "priced_at", "source")}
+    scale = _unit_scale(report.get("currency"))
+    fixes = []
+    scenarios = [x for x in report["scenarios"] if isinstance(x, dict)]
+    for sc in scenarios:
+        eq, sh, ps = _num(sc.get("equity_value")), _num(sc.get("diluted_shares_m")), _num(sc.get("per_share"))
+        if eq is not None and sh:
+            calc = eq * scale / (sh * 1e6)
+            if ps is None or abs(ps - calc) > VALUE_TOLERANCE * max(abs(calc), 0.01):
+                fixes.append(f"{sc.get('name', '?')}: per-share value corrected from "
+                             f"{ps if ps is not None else 'missing'} to {calc:,.2f} "
+                             "(= equity value / diluted shares)")
+                ps = calc
+            sc["per_share_checked"] = True
+        else:
+            sc["per_share_checked"] = False
+        sc["per_share"] = round(ps, 2) if ps is not None else None
+        if sc["per_share"] is not None and quote["price"]:
+            # vs price: + = value above price
+            sc["vs_price_pct"] = round((sc["per_share"] / quote["price"] - 1) * 100, 1)
+    report["scenarios"] = scenarios
+    vals = [sc["per_share"] for sc in scenarios if sc.get("per_share") is not None]
+    if len(vals) == 3 and not (vals[0] <= vals[1] <= vals[2]):
+        fixes.append("Scenario values are not in bear <= base <= bull order -- read the assumptions with care.")
+    base = next((sc for sc in scenarios if str(sc.get("name", "")).lower() == "base"), None)
+    if base and base.get("per_share") and base["per_share"] > 0:
+        # Margin of safety = how far the price sits below the base-case value.
+        report["margin_of_safety_pct"] = round((1 - quote["price"] / base["per_share"]) * 100, 1)
+    report["checks"] = fixes
+    return report
+
+
 REQUIRED = {
     "business": ("summary", "opportunities", "risks", "questions"),
     "financial": ("periods", "metrics", "analysis", "sources"),
     "earnings": ("period", "results", "drivers", "questions"),
     "compare": ("companies", "metrics", "quality_ranking", "valuation_ranking", "valuation_gap"),
+    "value": ("method", "scenarios", "sensitivity", "implied_expectations"),
 }
 
 
@@ -330,6 +471,8 @@ def _get_cached(symbol, horizon):
     if not DATABASE_URL:
         return None
     days = {EARN_KEY: EARNINGS_CACHE_DAYS, CMP_KEY: COMPARE_CACHE_DAYS}.get(horizon, CACHE_DAYS)
+    if horizon.startswith(VALUE_PREFIX):
+        days = VALUE_CACHE_DAYS
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     with _conn() as conn:
         with conn.cursor() as cur:
@@ -399,6 +542,9 @@ def _validate(report, kind):
         report["metrics"] = [m for m in report["metrics"] if isinstance(m, dict) and m.get("cells")]
         if not report["metrics"]:
             raise ValueError("report has no metric rows")
+    elif kind == "value":
+        if len([x for x in report["scenarios"] if isinstance(x, dict)]) != 3:
+            raise ValueError("report needs exactly 3 scenarios")
     else:
         # The model sometimes echoes the "... one row each" hint from the
         # shape as a literal string -- keep only real metric rows.
@@ -408,7 +554,7 @@ def _validate(report, kind):
     return report
 
 
-def _generate(symbol, kind, horizon, company_name):
+def _generate(symbol, kind, horizon, company_name, quote=None):
     who = f"{symbol} ({company_name})" if company_name else symbol
     today = f"Today is {datetime.now(timezone.utc).date().isoformat()}. "
     if kind == "financial":
@@ -424,6 +570,10 @@ def _generate(symbol, kind, horizon, company_name):
         prompt = today + _compare_prompt(tickers)
         # Filings + price/valuation data for each company.
         max_uses = min(20, 4 + 4 * len(tickers))
+    elif kind == "value":
+        prompt = today + _value_prompt(who, HORIZONS[horizon], quote)
+        # Filings for the base year + share count + rates/beta.
+        max_uses = 10
     else:
         prompt = today + _business_prompt(who, HORIZONS[horizon])
         max_uses = 8
@@ -451,15 +601,16 @@ def _generate(symbol, kind, horizon, company_name):
             continue
         if response.stop_reason == "max_tokens":
             raise RuntimeError("hit max_tokens before finishing")
-        return _validate(_extract_json(response.content), kind)
+        report = _validate(_extract_json(response.content), kind)
+        return _check_value(report, quote) if kind == "value" else report
 
     raise RuntimeError("still paused after 4 continuations")
 
 
-def _run_job(symbol, kind, horizon, company_name):
+def _run_job(symbol, kind, horizon, company_name, quote=None):
     key = (symbol, cache_key(kind, horizon))
     try:
-        report = _generate(symbol, kind, horizon, company_name)
+        report = _generate(symbol, kind, horizon, company_name, quote)
         _save(symbol, key[1], report)
         with _jobs_lock:
             _jobs.pop(key, None)
@@ -483,7 +634,7 @@ def get_status(symbol, kind, horizon):
     return {"status": state or "none"}
 
 
-def start(symbol, kind, horizon, company_name=None):
+def start(symbol, kind, horizon, company_name=None, quote=None):
     """Returns the cached report if one is fresh, otherwise starts a background
     job (unless one is already running or today's cap is used up)."""
     if not _client or not DATABASE_URL:
@@ -505,5 +656,9 @@ def start(symbol, kind, horizon, company_name=None):
             return {"status": "capped"}
         _jobs[key] = "pending"
 
-    threading.Thread(target=_run_job, args=(symbol, kind, horizon, company_name), daemon=True).start()
+    if kind == "value" and not quote:
+        with _jobs_lock:
+            _jobs.pop(key, None)
+        return {"status": "no_price"}
+    threading.Thread(target=_run_job, args=(symbol, kind, horizon, company_name, quote), daemon=True).start()
     return {"status": "pending"}
