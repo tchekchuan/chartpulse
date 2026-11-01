@@ -1927,6 +1927,11 @@ function renderTrackRecord(data) {
   const few = (o.trades || 0) < (data.min_trades_for_conclusion || 30);
   const block = (title, x, legacy) => {
     if (!x || !x.trades) return `<div class="track-block"><div class="track-block-h">${title}</div><div class="track-stat-lbl">No completed trades yet</div></div>`;
+    // Under 10 trades a group proves nothing either way: grey it out so a
+    // lucky or unlucky handful never reads as evidence.
+    if (x.trades < 10) return `<div class="track-block" style="opacity:.6"><div class="track-block-h">${title} · ${x.trades} trade${x.trades === 1 ? "" : "s"}</div>
+      <div class="track-stat-lbl" style="text-transform:none;letter-spacing:0;color:#e3b341">Too few trades to judge (fewer than 10). Shown for completeness only.</div>
+      <div class="track-stat-lbl" style="text-transform:none;letter-spacing:0;margin-top:4px">avg ${pct(x.avg_return_pct)} · ${x.target_hits} target · ${x.stop_hits} stop · ${x.expired} expired</div></div>`;
     return `<div class="track-block">
       <div class="track-block-h">${title} · ${x.trades} trade${x.trades === 1 ? '' : 's'}</div>
       <div style="display:flex;gap:16px;flex-wrap:wrap">

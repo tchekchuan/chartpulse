@@ -1331,6 +1331,11 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
 
     # Closing. No probability claims: the corrected Track Record has not
     # shown a reliable edge (2026-11-02), so the site must not imply one.
+    # A position size only makes sense for an entry the site would take.
+    if not entry_ok:
+        verdict_parts = [v for v in verdict_parts if not v.startswith("Suggested position size")]
+        suggested_position_pct = None
+
     if rating in ("STRONG BUY", "BUY") and entry_ok:
         verdict_parts.append(
             f"Overall: conditions score well and the entry from the current price offers {rr_now:.1f}:1 "
