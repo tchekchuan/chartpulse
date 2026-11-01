@@ -233,6 +233,30 @@
     .track-stat-lbl{font-size:.68rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em}
     .track-outcome{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
 
+    /* Equity Research modal */
+    #researchHorizon{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem}
+    #researchOpenBtn{background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:6px 12px;font-size:.8rem;font-weight:600;cursor:pointer}
+    #researchOpenBtn:hover{background:#388bfd}
+    #researchOverlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:none;align-items:center;justify-content:center}
+    #researchModal{background:#161b22;border:1px solid #30363d;border-radius:10px;width:96%;max-width:1040px;height:90vh;display:flex;flex-direction:column;overflow:hidden}
+    #researchHead{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid #30363d;flex-shrink:0;gap:10px}
+    #researchHead h2{font-size:.95rem;font-weight:700;color:#a78bfa}
+    #researchClose{background:none;border:1px solid #30363d;border-radius:5px;color:#8b949e;padding:3px 9px;cursor:pointer;font-size:.85rem;flex-shrink:0}
+    #researchClose:hover{border-color:#f85149;color:#f85149}
+    #researchDisclaimer{padding:8px 18px;font-size:.72rem;color:#8b949e;border-bottom:1px solid #21262d;line-height:1.5}
+    #researchBody{flex:1;overflow-y:auto;padding:16px 18px;font-size:.84rem;color:#c9d1d9;line-height:1.55}
+    #researchBody h4{font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bfa;margin:18px 0 8px}
+    #researchBody h4:first-child{margin-top:0}
+    #researchBody ul,#researchBody ol{margin:0 0 4px 18px}
+    #researchBody li{margin:3px 0}
+    .research-wrap{overflow-x:auto}
+    .research-table{width:100%;border-collapse:collapse;font-size:.8rem;min-width:640px}
+    .research-table th{text-align:left;padding:7px 10px;border-bottom:2px solid #30363d;color:#8b949e;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+    .research-table td{padding:8px 10px;border-bottom:1px solid #21262d;vertical-align:top}
+    .research-kind{font-size:.68rem;font-weight:700;border:1px solid;border-radius:4px;padding:1px 6px;white-space:nowrap}
+    .research-muted{color:#8b949e;font-size:.75rem}
+    .research-spinner{width:28px;height:28px;border:3px solid #30363d;border-top-color:#a78bfa;border-radius:50%;animation:spin 1s linear infinite;margin:30px auto 12px}
+
     /* My Portfolio modal */
     #myPortfolioBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
     #myPortfolioBtn:hover{border-color:#f0883e;color:#f0883e}
@@ -484,6 +508,20 @@
   </div>
 </div>
 
+<!-- Equity Research Modal (login-gated) -->
+<div id="researchOverlay">
+  <div id="researchModal">
+    <div id="researchHead">
+      <h2 id="researchTitle">🔬 Equity Research</h2>
+      <button id="researchClose">✕ Close</button>
+    </div>
+    <div id="researchDisclaimer">
+      Written by Claude (AI) from public filings and news found by web search. It can contain errors or out-of-date figures, so check the sources before relying on anything here. It gives no buy/sell rating and is not financial advice.
+    </div>
+    <div id="researchBody"></div>
+  </div>
+</div>
+
 <!-- My Portfolio Modal -->
 <div id="myPortfolioOverlay">
   <div id="myPortfolioModal">
@@ -616,6 +654,21 @@
       <h3>AI Analyst <span class="badge" id="aiAnalystBadge">—</span></h3>
       <div style="font-size:.65rem;color:#8b949e;margin-top:-6px;margin-bottom:4px">Claude &middot; cached, updates daily</div>
       <div id="aiAnalystContent"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
+    </div>
+
+    <!-- Equity Research — on-demand fundamental report (Claude + web
+         search). Logged-in only, like the AI Analyst. -->
+    <div class="panel" id="researchPanel" style="display:none">
+      <h3>Equity Research</h3>
+      <div style="font-size:.72rem;color:#8b949e;margin-bottom:8px;line-height:1.45">Segments, moat, customers, top 3 opportunities and risks, and open questions. Takes 1–3 min the first time; cached for a week.</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <select id="researchHorizon">
+          <option value="1y">1-year horizon</option>
+          <option value="3y" selected>3-year horizon</option>
+          <option value="5y">5-year horizon</option>
+        </select>
+        <button id="researchOpenBtn">Open report</button>
+      </div>
     </div>
 
     <!-- Trade Signals -->
@@ -1479,6 +1532,7 @@ async function loadStock() {
     // Render sidebars
     renderAnalyst(data.analyst, data.sentiment);
     renderAIAnalyst(data.ai_analyst);
+    document.getElementById('researchPanel').style.display = _currentUserEmail ? '' : 'none';
     renderSignals(data.signals);
     renderContext(data.context || [], data.stage);
     renderNews(data.news || [], data.sentiment);
@@ -1907,6 +1961,144 @@ function renderTrackRecord(data) {
       loadStock();
     });
   });
+}
+
+// ── Equity Research modal (login-gated) ──────────────────────────────────
+// The report text comes from the model and from web pages it read, so
+// unlike the other panels every field is escaped before it goes into HTML.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, ch =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+const RESEARCH_POLL_MS  = 6000;
+const RESEARCH_MAX_POLL = 60;     // ~6 min, well past a normal 1-3 min run
+let _researchToken = 0;           // bumped on open/close so stale polls stop
+
+function openResearch() {
+  const sym = window._lastData && window._lastData.meta && window._lastData.meta.symbol;
+  if (!sym) return;
+  const horizon = document.getElementById('researchHorizon').value;
+  const label   = document.getElementById('researchHorizon').selectedOptions[0].textContent;
+  document.getElementById('researchTitle').textContent = `🔬 Equity Research — ${sym} · ${label}`;
+  document.getElementById('researchOverlay').style.display = 'flex';
+  startResearch(sym, horizon, ++_researchToken);
+}
+function closeResearch() {
+  _researchToken++;
+  document.getElementById('researchOverlay').style.display = 'none';
+}
+
+document.getElementById('researchOpenBtn').addEventListener('click', openResearch);
+document.getElementById('researchClose').addEventListener('click', closeResearch);
+document.getElementById('researchOverlay').addEventListener('click', e => {
+  if (e.target.id === 'researchOverlay') closeResearch();
+});
+
+function researchMessage(html) {
+  document.getElementById('researchBody').innerHTML =
+    `<div style="text-align:center;color:#8b949e;padding:30px 10px">${html}</div>`;
+}
+
+async function startResearch(sym, horizon, token) {
+  researchMessage('<div class="research-spinner"></div>Checking for a recent report…');
+  let data;
+  try {
+    const res = await fetch('/api/research/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol: sym, horizon}),
+    });
+    data = await res.json();
+    if (!res.ok) {
+      if (token === _researchToken) researchMessage(esc(data.error || data.message || `Error ${res.status}`));
+      return;
+    }
+  } catch (err) {
+    if (token === _researchToken) researchMessage(`Network error: ${esc(err.message)}`);
+    return;
+  }
+  handleResearch(sym, horizon, token, data, 0);
+}
+
+function handleResearch(sym, horizon, token, data, polls) {
+  if (token !== _researchToken) return;   // modal closed or reopened
+  const s = data.status;
+  if (s === 'ready')       return renderResearch(data.report, data.generated_at);
+  if (s === 'capped')      return researchMessage("Today's limit for new research reports has been reached. Reports already generated this week still open instantly — try again tomorrow for this one.");
+  if (s === 'unavailable') return researchMessage('Equity Research is not available right now.');
+  if (s === 'failed' || s === 'none') {
+    researchMessage(`The report for ${esc(sym)} couldn't be generated this time.<br><br>
+      <button id="researchRetry" style="background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:6px 14px;cursor:pointer">Try again</button>`);
+    document.getElementById('researchRetry').addEventListener('click', () => startResearch(sym, horizon, token));
+    return;
+  }
+  // pending
+  if (polls >= RESEARCH_MAX_POLL) return researchMessage('This is taking longer than usual. Close this and reopen it in a few minutes — the report keeps generating in the background.');
+  const secs = Math.round(polls * RESEARCH_POLL_MS / 1000);
+  researchMessage(`<div class="research-spinner"></div>Researching ${esc(sym)} — reading recent filings, earnings calls and news…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
+  setTimeout(async () => {
+    if (token !== _researchToken) return;
+    try {
+      const res  = await fetch(`/api/research?symbol=${encodeURIComponent(sym)}&horizon=${horizon}`);
+      const next = await res.json();
+      if (!res.ok) return researchMessage(esc(next.error || `Error ${res.status}`));
+      handleResearch(sym, horizon, token, next, polls + 1);
+    } catch (err) {
+      // Transient network blip -- keep polling rather than giving up.
+      handleResearch(sym, horizon, token, {status: 'pending'}, polls + 1);
+    }
+  }, RESEARCH_POLL_MS);
+}
+
+function researchTable(headers, rows) {
+  if (!rows || !rows.length) return '<div class="research-muted">Not available.</div>';
+  return `<div class="research-wrap"><table class="research-table"><thead><tr>${
+    headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderResearch(r, generatedAt) {
+  const when = generatedAt ? new Date(generatedAt).toLocaleDateString() : '';
+  let html = `<div class="research-muted" style="margin-bottom:10px">${esc(r.company)}${
+    r.as_of ? ' · figures as of ' + esc(r.as_of) : ''}${when ? ' · generated ' + esc(when) : ''}</div>`;
+
+  html += `<h4>Summary</h4><div>${esc(r.summary)}</div>`;
+
+  html += '<h4>Revenue Streams</h4>' + researchTable(['Stream', 'Share', 'Trend', 'Note'],
+    (r.revenue_streams || []).map(x => [`<strong>${esc(x.name)}</strong>`, esc(x.share), esc(x.trend), esc(x.note)]));
+
+  html += '<h4>Business Segments</h4>' + researchTable(['Segment', 'What it does', 'Revenue', 'Growth / Margin'],
+    (r.segments || []).map(x => [`<strong>${esc(x.name)}</strong>`, esc(x.description), esc(x.revenue), esc(x.growth_or_margin)]));
+
+  const cc = r.customer_concentration || {};
+  html += `<h4>Customer Concentration${cc.level ? ' — ' + esc(cc.level) : ''}</h4><div>${esc(cc.assessment)}</div>`;
+  if (cc.details && cc.details.length) html += `<ul>${cc.details.map(d => `<li>${esc(d)}</li>`).join('')}</ul>`;
+
+  html += '<h4>Competitive Advantages</h4>' + researchTable(['Advantage', 'Strength', 'Evidence'],
+    (r.competitive_advantages || []).map(x => [`<strong>${esc(x.advantage)}</strong>`, esc(x.strength), esc(x.evidence)]));
+
+  html += '<h4>Growth Drivers</h4>' + researchTable(['Driver', 'Impact', 'Timing'],
+    (r.growth_drivers || []).map(x => [`<strong>${esc(x.driver)}</strong>`, esc(x.impact), esc(x.timing)]));
+
+  const kind = (label, c) => `<span class="research-kind" style="color:${c};border-color:${c};background:${c}22">${label}</span>`;
+  const factorRows = [
+    ...(r.opportunities || []).map(x => [kind('OPPORTUNITY', '#3fb950'), x]),
+    ...(r.risks || []).map(x => [kind('RISK', '#f85149'), x]),
+  ].map(([k, x]) => [`${k}<div style="margin-top:4px"><strong>${esc(x.factor)}</strong></div>`,
+                     esc(x.evidence), esc(x.metrics), esc(x.warning_signs)]);
+  html += '<h4>Top 3 Opportunities &amp; Top 3 Risks</h4>' +
+    researchTable(['Factor', 'Supporting evidence', 'Key metrics to monitor', 'Warning signs'], factorRows);
+
+  html += `<h4>Unanswered Questions to Investigate</h4><ol>${
+    (r.questions || []).map(q => `<li>${esc(q)}</li>`).join('')}</ol>`;
+
+  // Only http(s) links -- a javascript: URL from a scraped page must never become a link.
+  const sources = (r.sources || []).filter(s => /^https?:\/\//i.test(s.url || ''));
+  if (sources.length) {
+    html += `<h4>Sources</h4><ul>${sources.map(s =>
+      `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" style="color:#58a6ff">${esc(s.title || s.url)}</a></li>`).join('')}</ul>`;
+  }
+  document.getElementById('researchBody').innerHTML = html;
 }
 
 // ── My Portfolio modal (login-gated) ─────────────────────────────────────

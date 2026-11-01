@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 import logging
 import os
+import re
 import threading
 import time
 import requests
@@ -2044,6 +2045,50 @@ def ark_trades_route():
     })
 
 
+_RESEARCH_SYMBOL_RE = re.compile(r"^[A-Z0-9.\-^=]{1,15}$")
+
+
+def _research_args(src):
+    """Validates symbol + horizon for the equity research routes. Returns
+    (symbol, horizon, None) or (None, None, error_response)."""
+    symbol  = (src.get("symbol") or "").strip().upper()
+    horizon = (src.get("horizon") or "3y").strip().lower()
+    if not _RESEARCH_SYMBOL_RE.match(symbol):
+        return None, None, (jsonify({"error": "Invalid symbol"}), 400)
+    if horizon not in equity_research.HORIZONS:
+        return None, None, (jsonify({"error": "Invalid horizon"}), 400)
+    return symbol, horizon, None
+
+
+@app.route("/api/research")
+def research_status():
+    """Polled by the Equity Research modal. Read-only: never starts a job.
+    Login-gated like the AI Analyst -- each report is a real per-call cost."""
+    if not session.get("email"):
+        return jsonify({"error": "Log in to use Equity Research"}), 401
+    symbol, horizon, err = _research_args(request.args)
+    if err:
+        return err
+    return jsonify(equity_research.get_status(symbol, horizon))
+
+
+@app.route("/api/research/start", methods=["POST"])
+@limiter.limit("10 per hour")
+def research_start():
+    if not session.get("email"):
+        return jsonify({"error": "Log in to use Equity Research"}), 401
+    symbol, horizon, err = _research_args(request.get_json(silent=True) or {})
+    if err:
+        return err
+    # Usually a cache hit -- the user has just loaded this symbol's page.
+    # The name keeps the model from confusing tickers shared across exchanges.
+    try:
+        name = get_fundamentals(yf.Ticker(symbol)).get("name")
+    except Exception:
+        name = None
+    return jsonify(equity_research.start(symbol, horizon, name))
+
+
 @app.route("/api/track-record")
 def track_record_route():
     """getChartPulse's own backtested track record. alerts.py logs a
@@ -2195,6 +2240,7 @@ import user_holdings   # noqa: E402
 import user_watchlist  # noqa: E402
 import symbol_state    # noqa: E402
 import ai_analyst      # noqa: E402
+import equity_research # noqa: E402
 subscribers.init_db()
 ark_tracker.init_db()
 track_record.init_db()
@@ -2203,6 +2249,7 @@ user_holdings.init_db()
 user_watchlist.init_db()
 symbol_state.init_db()
 ai_analyst.init_db()
+equity_research.init_db()
 alerts.start_scheduler()
 
 
