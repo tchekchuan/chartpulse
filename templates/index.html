@@ -252,6 +252,8 @@
     #researchBody ul,#researchBody ol{margin:0 0 4px 18px}
     #researchBody li{margin:3px 0}
     .research-wrap{overflow-x:auto}
+    #pc_out .research-table{min-width:0}
+    #pc_out .research-table td{overflow-wrap:anywhere}
     .research-table{width:100%;border-collapse:collapse;font-size:.8rem;min-width:640px}
     .research-table th{text-align:left;padding:7px 10px;border-bottom:2px solid #30363d;color:#8b949e;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
     .research-table td{padding:8px 10px;border-bottom:1px solid #21262d;vertical-align:top}
@@ -2034,6 +2036,7 @@ function compareTickers(peersText) {
 function openResearch(report, horizon, peersText) {
   const sym = currentResearchSymbol();
   if (!sym) return;
+  document.getElementById('researchDisclaimer').style.display = '';
   document.getElementById('researchOverlay').style.display = 'flex';
   if (report === 'compare') {
     const list = compareTickers(peersText);
@@ -2104,6 +2107,7 @@ document.getElementById('researchOpenBtn').addEventListener('click', () =>
 // logged-in users pick a report for the loaded symbol right there.
 document.getElementById('researchBtn').addEventListener('click', () => {
   _researchToken++;
+  document.getElementById('researchDisclaimer').style.display = '';
   document.getElementById('researchTitle').textContent = '🔬 Equity Research';
   document.getElementById('researchOverlay').style.display = 'flex';
   const sym = currentResearchSymbol();
@@ -2436,6 +2440,9 @@ const PC_SAVED = ['account', 'riskPct', 'allocPct', 'feeFixed', 'feePct'];
 
 function openPositionCalc(prefill) {
   _researchToken++;   // stop any report polling that was showing in this window
+  // The window's standing "Written by Claude (AI)..." note is about the AI
+  // reports; this is plain arithmetic, so hide it (reports show it again).
+  document.getElementById('researchDisclaimer').style.display = 'none';
   document.getElementById('researchTitle').textContent = '🧮 Position Size Calculator — hypothetical long paper trade';
   document.getElementById('researchOverlay').style.display = 'flex';
   let saved = {};
