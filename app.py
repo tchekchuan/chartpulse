@@ -2102,7 +2102,7 @@ def _research_args(src):
         return None, None, None, (jsonify({"error": "Invalid symbol"}), 400)
     if report not in equity_research.REPORT_TYPES:
         return None, None, None, (jsonify({"error": "Invalid report type"}), 400)
-    if report == "thesis":
+    if report in equity_research.THESIS_REPORTS:
         # POST carries the thesis text; polling GETs carry only its key
         # (keeps up-to-2,000-char theses out of URLs). The key then rides
         # in the horizon slot, which is what the cache row is keyed on.
@@ -2198,7 +2198,7 @@ def research_start():
     symbol, report, horizon, err = _research_args(body)
     if err:
         return err
-    thesis = equity_research.normalise_thesis(body.get("thesis")) if report == "thesis" else None
+    thesis = equity_research.normalise_thesis(body.get("thesis")) if report in equity_research.THESIS_REPORTS else None
     facts = data_key = None
     if report == "swing":
         days = int(horizon.split("-")[0])
@@ -2221,7 +2221,7 @@ def research_start():
         except Exception:
             name = None
     result = equity_research.start(symbol, report, horizon, name, quote, thesis, facts)
-    if report == "thesis":
+    if report in equity_research.THESIS_REPORTS:
         result["thesis_key"] = horizon   # the page polls with this, not the text
     if report == "swing":
         result["data_key"] = data_key    # ditto -- the CSV never goes back in a URL
