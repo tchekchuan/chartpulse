@@ -362,6 +362,8 @@
       /* One swipeable row of feature buttons instead of three wrapped rows */
       .navbtns{order:3;flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;gap:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
       .navbtns::-webkit-scrollbar{display:none}
+      /* Fade the right edge while more buttons are off-screen, so the row reads as swipeable */
+      .navbtns:not(.at-end){-webkit-mask-image:linear-gradient(to right,#000 82%,transparent);mask-image:linear-gradient(to right,#000 82%,transparent)}
       .navbtns button{flex:none;white-space:nowrap;padding:5px 9px;font-size:.78rem}
       #legend{display:none}
 
@@ -891,6 +893,15 @@ function applyVisibility() {
 });
 
 applyVisibility();   // sync the legend with the default toggles before the first load
+
+// Mobile button row: drop the right-edge fade once scrolled to the end.
+(() => {
+  const nav = document.querySelector('.navbtns');
+  const upd = () => nav.classList.toggle('at-end', nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4);
+  nav.addEventListener('scroll', upd, {passive: true});
+  window.addEventListener('resize', upd);
+  upd();
+})();
 
 // Collapsible sidebar panels: click a title to open/close; the choice is
 // remembered in this browser (localStorage only).
