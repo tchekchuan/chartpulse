@@ -2049,15 +2049,19 @@ _RESEARCH_SYMBOL_RE = re.compile(r"^[A-Z0-9.\-^=]{1,15}$")
 
 
 def _research_args(src):
-    """Validates symbol + horizon for the equity research routes. Returns
-    (symbol, horizon, None) or (None, None, error_response)."""
+    """Validates symbol + report type + horizon for the equity research
+    routes. Returns (symbol, report, horizon, None) or
+    (None, None, None, error_response)."""
     symbol  = (src.get("symbol") or "").strip().upper()
+    report  = (src.get("report") or "business").strip().lower()
     horizon = (src.get("horizon") or "3y").strip().lower()
     if not _RESEARCH_SYMBOL_RE.match(symbol):
-        return None, None, (jsonify({"error": "Invalid symbol"}), 400)
+        return None, None, None, (jsonify({"error": "Invalid symbol"}), 400)
+    if report not in equity_research.REPORT_TYPES:
+        return None, None, None, (jsonify({"error": "Invalid report type"}), 400)
     if horizon not in equity_research.HORIZONS:
-        return None, None, (jsonify({"error": "Invalid horizon"}), 400)
-    return symbol, horizon, None
+        return None, None, None, (jsonify({"error": "Invalid horizon"}), 400)
+    return symbol, report, horizon, None
 
 
 @app.route("/api/research")
@@ -2066,10 +2070,10 @@ def research_status():
     Login-gated like the AI Analyst -- each report is a real per-call cost."""
     if not session.get("email"):
         return jsonify({"error": "Log in to use Equity Research"}), 401
-    symbol, horizon, err = _research_args(request.args)
+    symbol, report, horizon, err = _research_args(request.args)
     if err:
         return err
-    return jsonify(equity_research.get_status(symbol, horizon))
+    return jsonify(equity_research.get_status(symbol, report, horizon))
 
 
 @app.route("/api/research/start", methods=["POST"])
@@ -2077,7 +2081,7 @@ def research_status():
 def research_start():
     if not session.get("email"):
         return jsonify({"error": "Log in to use Equity Research"}), 401
-    symbol, horizon, err = _research_args(request.get_json(silent=True) or {})
+    symbol, report, horizon, err = _research_args(request.get_json(silent=True) or {})
     if err:
         return err
     # Usually a cache hit -- the user has just loaded this symbol's page.
@@ -2086,7 +2090,7 @@ def research_start():
         name = get_fundamentals(yf.Ticker(symbol)).get("name")
     except Exception:
         name = None
-    return jsonify(equity_research.start(symbol, horizon, name))
+    return jsonify(equity_research.start(symbol, report, horizon, name))
 
 
 @app.route("/api/track-record")

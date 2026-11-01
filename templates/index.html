@@ -234,7 +234,7 @@
     .track-outcome{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
 
     /* Equity Research modal */
-    #researchHorizon{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem}
+    #researchType,#researchHorizon{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem}
     #researchOpenBtn{background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:6px 12px;font-size:.8rem;font-weight:600;cursor:pointer}
     #researchOpenBtn:hover{background:#388bfd}
     #researchOverlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:none;align-items:center;justify-content:center}
@@ -660,8 +660,12 @@
          search). Logged-in only, like the AI Analyst. -->
     <div class="panel" id="researchPanel" style="display:none">
       <h3>Equity Research</h3>
-      <div style="font-size:.72rem;color:#8b949e;margin-bottom:8px;line-height:1.45">Segments, moat, customers, top 3 opportunities and risks, and open questions. Takes 1–3 min the first time; cached for a week.</div>
-      <div style="display:flex;gap:6px;align-items:center">
+      <div style="font-size:.72rem;color:#8b949e;margin-bottom:8px;line-height:1.45">AI-written fundamental reports with sources. Takes 1–3 min the first time; cached for a week.</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <select id="researchType">
+          <option value="business">Business &amp; risks</option>
+          <option value="financial">Financial strength</option>
+        </select>
         <select id="researchHorizon">
           <option value="1y">1-year horizon</option>
           <option value="3y" selected>3-year horizon</option>
@@ -1978,17 +1982,25 @@ let _researchToken = 0;           // bumped on open/close so stale polls stop
 function openResearch() {
   const sym = window._lastData && window._lastData.meta && window._lastData.meta.symbol;
   if (!sym) return;
-  const horizon = document.getElementById('researchHorizon').value;
-  const label   = document.getElementById('researchHorizon').selectedOptions[0].textContent;
-  document.getElementById('researchTitle').textContent = `🔬 Equity Research — ${sym} · ${label}`;
+  const typeSel = document.getElementById('researchType');
+  const hzSel   = document.getElementById('researchHorizon');
+  const req = {symbol: sym, report: typeSel.value, horizon: hzSel.value};
+  const label = req.report === 'financial'
+    ? 'Financial Strength'
+    : `Business & Risks · ${hzSel.selectedOptions[0].textContent}`;
+  document.getElementById('researchTitle').textContent = `🔬 ${sym} — ${label}`;
   document.getElementById('researchOverlay').style.display = 'flex';
-  startResearch(sym, horizon, ++_researchToken);
+  startResearch(req, ++_researchToken);
 }
 function closeResearch() {
   _researchToken++;
   document.getElementById('researchOverlay').style.display = 'none';
 }
 
+// A financial-strength report covers fixed periods, not a horizon.
+document.getElementById('researchType').addEventListener('change', e => {
+  document.getElementById('researchHorizon').style.display = e.target.value === 'financial' ? 'none' : '';
+});
 document.getElementById('researchOpenBtn').addEventListener('click', openResearch);
 document.getElementById('researchClose').addEventListener('click', closeResearch);
 document.getElementById('researchOverlay').addEventListener('click', e => {
@@ -2000,13 +2012,13 @@ function researchMessage(html) {
     `<div style="text-align:center;color:#8b949e;padding:30px 10px">${html}</div>`;
 }
 
-async function startResearch(sym, horizon, token) {
+async function startResearch(req, token) {
   researchMessage('<div class="research-spinner"></div>Checking for a recent report…');
   let data;
   try {
     const res = await fetch('/api/research/start', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({symbol: sym, horizon}),
+      body: JSON.stringify(req),
     });
     data = await res.json();
     if (!res.ok) {
@@ -2017,35 +2029,41 @@ async function startResearch(sym, horizon, token) {
     if (token === _researchToken) researchMessage(`Network error: ${esc(err.message)}`);
     return;
   }
-  handleResearch(sym, horizon, token, data, 0);
+  handleResearch(req, token, data, 0);
 }
 
-function handleResearch(sym, horizon, token, data, polls) {
+function handleResearch(req, token, data, polls) {
   if (token !== _researchToken) return;   // modal closed or reopened
   const s = data.status;
-  if (s === 'ready')       return renderResearch(data.report, data.generated_at);
+  if (s === 'ready') {
+    return req.report === 'financial'
+      ? renderFinancial(data.report, data.generated_at)
+      : renderResearch(data.report, data.generated_at);
+  }
   if (s === 'capped')      return researchMessage("Today's limit for new research reports has been reached. Reports already generated this week still open instantly — try again tomorrow for this one.");
   if (s === 'unavailable') return researchMessage('Equity Research is not available right now.');
   if (s === 'failed' || s === 'none') {
-    researchMessage(`The report for ${esc(sym)} couldn't be generated this time.<br><br>
+    researchMessage(`The report for ${esc(req.symbol)} couldn't be generated this time.<br><br>
       <button id="researchRetry" style="background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:6px 14px;cursor:pointer">Try again</button>`);
-    document.getElementById('researchRetry').addEventListener('click', () => startResearch(sym, horizon, token));
+    document.getElementById('researchRetry').addEventListener('click', () => startResearch(req, token));
     return;
   }
   // pending
   if (polls >= RESEARCH_MAX_POLL) return researchMessage('This is taking longer than usual. Close this and reopen it in a few minutes — the report keeps generating in the background.');
   const secs = Math.round(polls * RESEARCH_POLL_MS / 1000);
-  researchMessage(`<div class="research-spinner"></div>Researching ${esc(sym)} — reading recent filings, earnings calls and news…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
+  const what = req.report === 'financial' ? 'annual and interim filings, cash-flow statements and peers' : 'recent filings, earnings calls and news';
+  researchMessage(`<div class="research-spinner"></div>Researching ${esc(req.symbol)} — reading ${what}…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
   setTimeout(async () => {
     if (token !== _researchToken) return;
     try {
-      const res  = await fetch(`/api/research?symbol=${encodeURIComponent(sym)}&horizon=${horizon}`);
+      const q    = new URLSearchParams(req).toString();
+      const res  = await fetch(`/api/research?${q}`);
       const next = await res.json();
       if (!res.ok) return researchMessage(esc(next.error || `Error ${res.status}`));
-      handleResearch(sym, horizon, token, next, polls + 1);
+      handleResearch(req, token, next, polls + 1);
     } catch (err) {
       // Transient network blip -- keep polling rather than giving up.
-      handleResearch(sym, horizon, token, {status: 'pending'}, polls + 1);
+      handleResearch(req, token, {status: 'pending'}, polls + 1);
     }
   }, RESEARCH_POLL_MS);
 }
@@ -2097,6 +2115,63 @@ function renderResearch(r, generatedAt) {
   if (sources.length) {
     html += `<h4>Sources</h4><ul>${sources.map(s =>
       `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" style="color:#58a6ff">${esc(s.title || s.url)}</a></li>`).join('')}</ul>`;
+  }
+  document.getElementById('researchBody').innerHTML = html;
+}
+
+// Every figure carries a source id; a cell links to its source as [n].
+function renderFinancial(r, generatedAt) {
+  const srcById = {};
+  (r.sources || []).forEach(s => { if (s && s.id != null) srcById[s.id] = s; });
+  const cite = id => {
+    const s = srcById[id];
+    if (!s) return '';
+    const tag = `<sup style="font-size:.62rem">[${esc(id)}]</sup>`;
+    return /^https?:\/\//i.test(s.url || '')
+      ? `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" title="${esc(s.title || s.url)}" style="color:#58a6ff;text-decoration:none">${tag}</a>`
+      : tag;
+  };
+
+  const when = generatedAt ? new Date(generatedAt).toLocaleDateString() : '';
+  let html = `<div class="research-muted" style="margin-bottom:10px">${esc(r.company)}${
+    r.currency ? ' · ' + esc(r.currency) : ''}${r.fiscal_year_end ? ' · FY ends ' + esc(r.fiscal_year_end) : ''}${
+    r.as_of ? ' · latest: ' + esc(r.as_of) : ''}${when ? ' · generated ' + esc(when) : ''}</div>`;
+
+  const periods = r.periods || [];
+  html += '<h4>Financial Summary</h4>' + researchTable(['Metric', ...periods],
+    (r.metrics || []).map(m => [
+      `<strong>${esc(m.metric)}</strong>`,
+      ...periods.map((_, i) => {
+        const c = (m.cells || [])[i] || {};
+        return `<span style="font-family:monospace">${esc(c.value == null ? 'n/a' : c.value)}</span>${cite(c.source)}`;
+      }),
+    ]));
+  html += `<div class="research-muted" style="margin-top:4px">(calc) = calculated from the cited filing's figures. [n] links to the source.</div>`;
+
+  const a = r.analysis || {};
+  [['Major Trends', a.trends], ['Cash-Flow Quality', a.cash_flow_quality], ['Debt Risks', a.debt_risks],
+   ['Potential Dilution', a.dilution], ['Working-Capital Changes', a.working_capital]].forEach(([h, t]) => {
+    if (t) html += `<h4>${h}</h4><div>${esc(t)}</div>`;
+  });
+
+  html += '<h4>Peer Benchmark</h4>' + researchTable(['Company', 'Period', 'Rev growth', 'Op margin', 'FCF margin', 'Leverage'],
+    (r.peers || []).map(p => [
+      `<strong>${esc(p.company)}</strong>${p.ticker ? ' <span class="research-muted">' + esc(p.ticker) + '</span>' : ''}${cite(p.source)}`,
+      esc(p.period), esc(p.revenue_growth), esc(p.operating_margin), esc(p.fcf_margin), esc(p.leverage),
+    ]));
+
+  const sevColor = {High: '#f85149', Medium: '#e3b341', Low: '#8b949e'};
+  html += '<h4>Signs of Financial Deterioration</h4>' + researchTable(['Severity', 'Flag', 'Evidence'],
+    (r.red_flags || []).map(f => {
+      const c = sevColor[f.severity] || '#8b949e';
+      return [`<span class="research-kind" style="color:${c};border-color:${c};background:${c}22">${esc(f.severity || '—')}</span>`,
+              `<strong>${esc(f.flag)}</strong>`, esc(f.evidence)];
+    }));
+
+  const sources = (r.sources || []).filter(s => /^https?:\/\//i.test(s.url || ''));
+  if (sources.length) {
+    html += `<h4>Sources</h4><ol style="list-style:none;margin-left:0">${sources.map(s =>
+      `<li>[${esc(s.id)}] <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" style="color:#58a6ff">${esc(s.title || s.url)}</a></li>`).join('')}</ol>`;
   }
   document.getElementById('researchBody').innerHTML = html;
 }

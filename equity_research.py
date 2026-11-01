@@ -16,6 +16,13 @@
 #       evidence / metrics to monitor / warning signs), and open
 #       questions. It deliberately gives NO buy/sell rating.
 #
+#       Second report type, "financial": a financial-strength review
+#       of the last 3 fiscal years + comparable YTD (revenue, growth,
+#       op margin, OCF, capex, FCF, debt, cash, diluted shares) with a
+#       source id on every figure, trend / cash-flow quality / debt /
+#       dilution / working-capital analysis, a peer benchmark, and
+#       deterioration flags.
+#
 #       A report takes 1-3 minutes (several web searches), far past
 #       gunicorn's 30s worker timeout on a single sync worker, so it
 #       runs in a background thread and the page polls for it.
@@ -48,10 +55,19 @@ DAILY_CAP = int(os.environ.get("EQUITY_RESEARCH_DAILY_CAP", "5"))
 CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_CACHE_DAYS", "7"))
 
 HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
+# Two report types share one pipeline and one cache table. The table's
+# `horizon` column is the cache key: "1y"/"3y"/"5y" for a business report,
+# FIN_KEY for a financial-strength report (which has no horizon).
+REPORT_TYPES = ("business", "financial")
+FIN_KEY = "fin"
+
+
+def cache_key(report, horizon):
+    return FIN_KEY if report == "financial" else horizon
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
-# (symbol, horizon) -> "pending" | "failed". Only tracks jobs started by
+# (symbol, cache_key) -> "pending" | "failed". Only tracks jobs started by
 # this process; finished reports live in Postgres.
 _jobs = {}
 _jobs_lock = threading.Lock()
@@ -82,6 +98,72 @@ OUTPUT_SHAPE = """{
   "questions": [""],
   "sources": [{"title": "", "url": ""}]
 }"""
+
+FINANCIAL_SHAPE = """{
+  "company": "full company name",
+  "currency": "reporting currency and unit, e.g. 'USD millions'",
+  "fiscal_year_end": "e.g. 'late June'",
+  "as_of": "latest reporting period used",
+  "periods": ["FY2024", "FY2025", "FY2026", "YTD FY2027 (Q1)", "YTD FY2026 (Q1)"],
+  "metrics": [
+    {"metric": "Revenue", "cells": [{"value": "", "source": 1}]},
+    "... one row each, in this order: Revenue, Revenue growth (YoY), Operating margin, Operating cash flow, Capital expenditures, Free cash flow, Total debt, Cash & equivalents (incl. short-term investments), Diluted shares outstanding -- each with exactly one cell per period, same order as periods"
+  ],
+  "analysis": {
+    "trends": "", "cash_flow_quality": "", "debt_risks": "",
+    "dilution": "", "working_capital": ""
+  },
+  "peers": [{"company": "", "ticker": "", "period": "", "revenue_growth": "", "operating_margin": "",
+             "fcf_margin": "", "leverage": "net debt / EBITDA or debt-to-equity, say which", "source": 1}],
+  "red_flags": [{"flag": "", "severity": "High | Medium | Low", "evidence": ""}],
+  "sources": [{"id": 1, "title": "", "url": ""}]
+}"""
+
+
+def _business_prompt(who, label):
+    return (
+        f"Analyze {who} over a {label} investment horizon. Break down its revenue streams, "
+        "business segments, customer concentration, competitive advantages, and growth "
+        "drivers. Identify the three biggest opportunities and three most material risks; "
+        "for each give the supporting evidence, the key metrics to monitor, and the warning "
+        "signs that the thesis is breaking. Conclude with the most important unanswered "
+        "questions an investor should investigate.\n\n"
+        "Search for the latest filings and earnings results first.\n\n"
+        "Your final message must be ONLY a JSON object (no markdown fences, no other "
+        f"text) in exactly this shape:\n{OUTPUT_SHAPE}\n"
+        "Exactly 3 opportunities and 3 risks. 4-7 questions. List the URLs you actually "
+        "relied on in sources."
+    )
+
+
+def _financial_prompt(who):
+    return (
+        f"Evaluate {who}'s financial strength using its latest three fiscal years and "
+        "comparable year-to-date results (latest YTD vs the same YTD period a year "
+        "earlier). Cover revenue, growth, operating margins, operating cash flow, capital "
+        "expenditures, free cash flow, total debt, cash, and diluted shares outstanding. "
+        "Explain major trends, cash-flow quality (e.g. OCF vs net income, reliance on "
+        "working capital, stock-based compensation), debt risks (maturities, covenants, "
+        "convertibles, interest coverage), potential dilution (convertibles, ATM programs, "
+        "warrants, SBC), and working-capital changes. Benchmark against 2-4 relevant "
+        "competitors on comparable periods, and flag any signs of financial deterioration.\n\n"
+        "Get figures from the company's own filings (10-K/10-Q/20-F/annual and interim "
+        "reports) or its investor-relations releases wherever possible.\n\n"
+        "Citation rules: every cell's \"source\" is the id of the entry in sources that the "
+        "figure came from. For a figure you calculated (growth, margins, FCF = OCF - capex), "
+        "cite the filing its inputs came from and add ' (calc)' to the value. If a figure "
+        "cannot be found, set value to 'n/a' and source to null -- never estimate it. If the "
+        "company reports semi-annually or has no YTD period yet, still return 5 periods and "
+        "label the last two to say what they are.\n\n"
+        "Your final message must be ONLY a JSON object (no markdown fences, no other "
+        f"text) in exactly this shape:\n{FINANCIAL_SHAPE}"
+    )
+
+
+REQUIRED = {
+    "business": ("summary", "opportunities", "risks", "questions"),
+    "financial": ("periods", "metrics", "analysis", "sources"),
+}
 
 
 def _conn():
@@ -164,36 +246,36 @@ def _extract_json(response_content):
     return json.loads(text[start:end + 1])
 
 
-def _validate(report):
+def _validate(report, kind):
     """Reject a report missing the sections the page renders, rather than
     caching a half-empty one for a week."""
-    for key in ("summary", "opportunities", "risks", "questions"):
+    for key in REQUIRED[kind]:
         if not report.get(key):
             raise ValueError(f"report missing '{key}'")
-    report["opportunities"] = report["opportunities"][:3]
-    report["risks"] = report["risks"][:3]
+    if kind == "business":
+        report["opportunities"] = report["opportunities"][:3]
+        report["risks"] = report["risks"][:3]
+    else:
+        # The model sometimes echoes the "... one row each" hint from the
+        # shape as a literal string -- keep only real metric rows.
+        report["metrics"] = [m for m in report["metrics"] if isinstance(m, dict) and m.get("cells")]
+        if not report["metrics"]:
+            raise ValueError("report has no metric rows")
     return report
 
 
-def _generate(symbol, horizon, company_name):
-    label = HORIZONS[horizon]
+def _generate(symbol, kind, horizon, company_name):
     who = f"{symbol} ({company_name})" if company_name else symbol
-    prompt = (
-        f"Today is {datetime.now(timezone.utc).date().isoformat()}. Analyze {who} over a "
-        f"{label} investment horizon. Break down its revenue streams, business segments, "
-        "customer concentration, competitive advantages, and growth drivers. Identify the "
-        "three biggest opportunities and three most material risks; for each give the "
-        "supporting evidence, the key metrics to monitor, and the warning signs that the "
-        "thesis is breaking. Conclude with the most important unanswered questions an "
-        "investor should investigate.\n\n"
-        "Search for the latest filings and earnings results first.\n\n"
-        "Your final message must be ONLY a JSON object (no markdown fences, no other "
-        f"text) in exactly this shape:\n{OUTPUT_SHAPE}\n"
-        "Exactly 3 opportunities and 3 risks. 4-7 questions. List the URLs you actually "
-        "relied on in sources."
-    )
+    today = f"Today is {datetime.now(timezone.utc).date().isoformat()}. "
+    if kind == "financial":
+        prompt = today + _financial_prompt(who)
+        # Three annual reports + interim + peers needs more lookups.
+        max_uses = 12
+    else:
+        prompt = today + _business_prompt(who, HORIZONS[horizon])
+        max_uses = 8
     messages = [{"role": "user", "content": prompt}]
-    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 8}]
+    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_uses}]
 
     # A long server-tool turn can come back as pause_turn; resending the
     # partial assistant turn lets the server continue where it stopped.
@@ -216,48 +298,50 @@ def _generate(symbol, horizon, company_name):
             continue
         if response.stop_reason == "max_tokens":
             raise RuntimeError("hit max_tokens before finishing")
-        return _validate(_extract_json(response.content))
+        return _validate(_extract_json(response.content), kind)
 
     raise RuntimeError("still paused after 4 continuations")
 
 
-def _run_job(symbol, horizon, company_name):
-    key = (symbol, horizon)
+def _run_job(symbol, kind, horizon, company_name):
+    key = (symbol, cache_key(kind, horizon))
     try:
-        report = _generate(symbol, horizon, company_name)
-        _save(symbol, horizon, report)
+        report = _generate(symbol, kind, horizon, company_name)
+        _save(symbol, key[1], report)
         with _jobs_lock:
             _jobs.pop(key, None)
     except Exception as e:
-        print(f"equity_research: job failed for {symbol}/{horizon}: {type(e).__name__}: {e}")
+        print(f"equity_research: job failed for {symbol}/{key[1]}: {type(e).__name__}: {e}")
         with _jobs_lock:
             _jobs[key] = "failed"
 
 
-def get_status(symbol, horizon):
+def get_status(symbol, kind, horizon):
     """Polling read: never starts a job. Returns status ready | pending |
     failed | none (or unavailable when the feature isn't configured)."""
     if not _client or not DATABASE_URL:
         return {"status": "unavailable"}
-    cached = _get_cached(symbol, horizon)
+    ck = cache_key(kind, horizon)
+    cached = _get_cached(symbol, ck)
     if cached:
         return cached
     with _jobs_lock:
-        state = _jobs.get((symbol, horizon))
+        state = _jobs.get((symbol, ck))
     return {"status": state or "none"}
 
 
-def start(symbol, horizon, company_name=None):
+def start(symbol, kind, horizon, company_name=None):
     """Returns the cached report if one is fresh, otherwise starts a background
     job (unless one is already running or today's cap is used up)."""
     if not _client or not DATABASE_URL:
         return {"status": "unavailable"}
 
-    cached = _get_cached(symbol, horizon)
+    ck = cache_key(kind, horizon)
+    cached = _get_cached(symbol, ck)
     if cached:
         return cached
 
-    key = (symbol, horizon)
+    key = (symbol, ck)
     with _jobs_lock:
         if _jobs.get(key) == "pending":
             return {"status": "pending"}
@@ -268,5 +352,5 @@ def start(symbol, horizon, company_name=None):
             return {"status": "capped"}
         _jobs[key] = "pending"
 
-    threading.Thread(target=_run_job, args=(symbol, horizon, company_name), daemon=True).start()
+    threading.Thread(target=_run_job, args=(symbol, kind, horizon, company_name), daemon=True).start()
     return {"status": "pending"}
