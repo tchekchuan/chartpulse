@@ -2174,6 +2174,10 @@ document.getElementById('codeForm').addEventListener('submit', async e => {
     if (data.ok) {
       _currentUserEmail = _pendingLoginEmail;
       showMyPortfolioContent();
+      // The login-gated sidebar panels were rendered while logged out --
+      // reload the current symbol so AI Analyst + Equity Research appear
+      // now instead of only after the next search.
+      if (window._lastData) loadStock();
     } else {
       status.textContent = data.message || 'Invalid or expired code.';
     }
@@ -2189,6 +2193,8 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   _currentUserEmail = null;
   document.getElementById('loginBox').style.display = 'block';
   document.getElementById('myPortfolioContent').style.display = 'none';
+  document.getElementById('aiAnalystPanel').style.display = 'none';
+  document.getElementById('researchPanel').style.display = 'none';
 });
 
 // ── Add-symbol autocomplete (search by company name or ticker) ──────────
