@@ -2110,7 +2110,9 @@ document.getElementById('researchBtn').addEventListener('click', () => {
   const btn = 'background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:7px 14px;cursor:pointer;font-size:.85rem';
   if (!_currentUserEmail) {
     researchMessage(`Research reports are for logged-in subscribers.<br><br>
-      <button id="researchLogin" style="${btn}">Log in with your email</button>`);
+      <button id="researchLogin" style="${btn}">Log in with your email</button><br><br>
+      <button id="researchCalcOut" style="${btn};background:#30363d">🧮 Position size calculator — no login needed</button>`);
+    document.getElementById('researchCalcOut').addEventListener('click', () => openPositionCalc());
     document.getElementById('researchLogin').addEventListener('click', () => { closeResearch(); openMyPortfolio(); });
     return;
   }
@@ -2122,6 +2124,9 @@ document.getElementById('researchBtn').addEventListener('click', () => {
           <option value="1y">1-year</option><option value="3y" selected>3-year</option><option value="5y">5-year</option>
         </select>
         <button id="researchPickBiz" style="${btn};flex:1">Business &amp; risks report</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button id="researchPickCalc" style="${btn};flex:1;background:#30363d">🧮 Position size calculator (instant, free)</button>
       </div>
       <button id="researchPickVal" style="${btn}">Intrinsic value — bear / base / bull (uses horizon above)</button>
       <button id="researchPickFin" style="${btn}">Financial strength report</button>
@@ -2157,6 +2162,7 @@ document.getElementById('researchBtn').addEventListener('click', () => {
     openResearch('compare', '3y', document.getElementById('researchPickPeers').value));
   document.getElementById('researchPickBiz').addEventListener('click', () =>
     openResearch('business', document.getElementById('researchPickHorizon').value));
+  document.getElementById('researchPickCalc').addEventListener('click', () => openPositionCalc());
   document.getElementById('researchPickVal').addEventListener('click', () =>
     openResearch('value', document.getElementById('researchPickHorizon').value));
   document.getElementById('researchPickFin').addEventListener('click', () => openResearch('financial', '3y'));
@@ -2355,6 +2361,161 @@ function renderEarnings(r, generatedAt) {
   document.getElementById('researchBody').innerHTML = html;
 }
 
+// ── Position size calculator (pure arithmetic, runs in the browser) ──────
+// No model, no server call, no daily cap. Long trades only, no leverage.
+// Inputs in one currency. Optional costs: a fixed fee per order (charged
+// on entry and on exit) and a percentage fee on the value of each order.
+function calcPosition(inp) {
+  const num = k => (inp[k] === '' || inp[k] == null) ? NaN : Number(inp[k]);
+  const A = num('account'), R = num('riskPct'), E = num('entry'), S = num('stop'), T = num('target'), Y = num('allocPct');
+  const C = isNaN(num('feeFixed')) ? 0 : num('feeFixed');
+  const F = isNaN(num('feePct')) ? 0 : num('feePct') / 100;
+  const errors = [];
+  if (!(A > 0)) errors.push('Account size must be greater than 0.');
+  if (!(R > 0 && R <= 100)) errors.push('Maximum account risk must be above 0% and at most 100%.');
+  if (!(Y > 0 && Y <= 100)) errors.push('Maximum allocation must be above 0% and at most 100% (no leverage).');
+  if (!(E > 0)) errors.push('Entry price must be greater than 0.');
+  if (!(S >= 0)) errors.push('Stop-loss must be a price of 0 or more.');
+  if (!(T > 0)) errors.push('Target price must be greater than 0.');
+  if (E > 0 && S >= 0 && S >= E) errors.push('For a long trade the stop-loss must be below the entry price.');
+  if (E > 0 && T > 0 && T <= E) errors.push('For a long trade the target must be above the entry price.');
+  if (C < 0 || F < 0) errors.push('Transaction costs cannot be negative.');
+  if (F >= 0.1) errors.push('A percentage fee of 10% or more per order looks like a typo.');
+  if (errors.length) return {ok: false, errors};
+
+  const floor = x => Math.max(0, Math.floor(x + 1e-9));   // whole shares; epsilon absorbs float noise
+  const riskBudget = A * R / 100;
+  const allocCap = A * Y / 100;
+  // Loss per share if the stop fills exactly: price drop + % fee on both orders.
+  const lossPerShare = (E - S) + F * (E + S);
+  const byRisk  = floor((riskBudget - 2 * C) / lossPerShare);
+  // Cash needed per share at entry, including the % entry fee; the fixed entry fee comes off the cap first.
+  const byAlloc = floor((allocCap - C) / (E * (1 + F)));
+  const shares = Math.min(byRisk, byAlloc);
+  const binding = byRisk < byAlloc ? 'risk' : byAlloc < byRisk ? 'allocation' : 'both';
+
+  const costEntry = shares ? C + F * shares * E : 0;
+  const costExitStop = shares ? C + F * shares * S : 0;
+  const costExitTarget = shares ? C + F * shares * T : 0;
+  const capital = shares * E + costEntry;
+  const plannedLoss = shares * (E - S) + costEntry + costExitStop;
+  const grossProfit = shares * (T - E);
+  const netProfit = grossProfit - costEntry - costExitTarget;
+  // Illustration only: a gap that opens one full stop-distance below the stop.
+  const gapFill = Math.max(0, S - (E - S));
+  const gapLoss = shares * (E - gapFill) + costEntry + (shares ? C + F * shares * gapFill : 0);
+
+  const warnings = [];
+  if (shares === 0) {
+    if (riskBudget <= 2 * C) warnings.push('The risk budget does not even cover the fixed fees for entering and exiting, so no position fits.');
+    else if (byRisk === 0) warnings.push('One share would already lose more than the risk budget at the stop — the stop is too far away for this account and risk limit.');
+    else warnings.push('One share costs more than the allocation cap allows.');
+  }
+  if (shares > 0 && netProfit <= 0) warnings.push('After costs, reaching the target would not make a profit.');
+  if ((T - E) / (E - S) < 1) warnings.push('The target is closer to the entry than the stop is (reward-to-risk below 1).');
+  if (F === 0 && C === 0) warnings.push('No transaction costs were entered, so the figures are before fees.');
+
+  return {
+    ok: true, errors: [], warnings, shares, binding, byRisk, byAlloc,
+    riskBudget, allocCap, lossPerShare, capital, capitalPct: capital / A * 100,
+    plannedLoss, plannedLossPct: plannedLoss / A * 100,
+    grossProfit, netProfit, costs: {entry: costEntry, exitStop: costExitStop, exitTarget: costExitTarget},
+    rrGross: (T - E) / (E - S), rrNet: plannedLoss > 0 ? netProfit / plannedLoss : null,
+    gapFill, gapLoss, gapLossPct: gapLoss / A * 100,
+    inputs: {A, R, E, S, T, Y, C, F},
+  };
+}
+
+const PC_FIELDS = [
+  ['account', 'Account size', '10000'], ['riskPct', 'Max account risk %', '1'], ['allocPct', 'Max allocation %', '20'],
+  ['entry', 'Entry price', ''], ['stop', 'Stop-loss price', ''], ['target', 'Target price', ''],
+  ['feeFixed', 'Fee per order (optional)', '0'], ['feePct', 'Fee % per order (optional)', '0'],
+];
+// Account settings are remembered in this browser only (never sent anywhere).
+const PC_SAVED = ['account', 'riskPct', 'allocPct', 'feeFixed', 'feePct'];
+
+function openPositionCalc(prefill) {
+  _researchToken++;   // stop any report polling that was showing in this window
+  document.getElementById('researchTitle').textContent = '🧮 Position Size Calculator — hypothetical long paper trade';
+  document.getElementById('researchOverlay').style.display = 'flex';
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('gcp_poscalc') || '{}'); } catch (e) { /* ignore */ }
+  const vals = {};
+  PC_FIELDS.forEach(([k, , d]) => { vals[k] = (prefill && prefill[k] != null) ? prefill[k] : (saved[k] != null ? saved[k] : d); });
+  if (vals.entry === '' && !(prefill && prefill.entry != null)) {
+    const p = window._lastData && window._lastData.meta && window._lastData.meta.price;
+    if (p) vals.entry = p;
+  }
+  const field = ([k, label]) => `<label style="display:flex;flex-direction:column;gap:3px;font-size:.75rem;color:#8b949e">${esc(label)}
+    <input id="pc_${k}" type="number" step="any" min="0" value="${esc(vals[k])}" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.9rem;font-family:monospace"></label>`;
+  document.getElementById('researchBody').innerHTML = `
+    <div style="border:1px solid #e3b341;background:#e3b34114;border-radius:6px;padding:8px 10px;font-size:.8rem;margin-bottom:10px">
+      A hypothetical paper-trade calculation. It does not place orders and is not a recommendation.${prefill && prefill.from ? ' Levels loaded from: ' + esc(prefill.from) + '.' : ''}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">${PC_FIELDS.map(field).join('')}</div>
+    <div id="pc_out" style="margin-top:12px"></div>`;
+  const read = () => Object.fromEntries(PC_FIELDS.map(([k]) => [k, document.getElementById('pc_' + k).value]));
+  const update = () => {
+    const inp = read();
+    try { localStorage.setItem('gcp_poscalc', JSON.stringify(Object.fromEntries(PC_SAVED.map(k => [k, inp[k]])))); } catch (e) { /* ignore */ }
+    document.getElementById('pc_out').innerHTML = renderPositionCalc(calcPosition(inp));
+  };
+  PC_FIELDS.forEach(([k]) => document.getElementById('pc_' + k).addEventListener('input', update));
+  update();
+}
+
+function renderPositionCalc(r) {
+  if (!r.ok) return `<div style="border:1px solid #f85149;background:#f8514914;border-radius:6px;padding:8px 10px">
+    <strong style="color:#f85149">Inputs rejected</strong><ul style="margin:4px 0 0">${r.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`;
+  const i = r.inputs;
+  const m = (x, d = 2) => Number(x).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+  const mono = x => `<span style="font-family:monospace">${x}</span>`;
+  const bindTxt = {risk: 'the risk limit', allocation: 'the allocation cap', both: 'both limits equally'}[r.binding];
+  const feeOn = i.C > 0 || i.F > 0;
+  const fee = (base) => feeOn ? ` + fees ${m(base)}` : '';
+  let html = `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;margin-bottom:6px">
+    <span style="font-size:1.6rem;font-weight:700;font-family:monospace">${m(r.shares, 0)}</span><span>shares</span>
+    <span class="research-muted">limited by ${bindTxt}</span></div>`;
+
+  html += researchTable(['', 'Amount', '% of account', 'Calculation'], [
+    ['Capital required', mono(m(r.capital)), mono(m(r.capitalPct) + '%'), mono(`${m(r.shares, 0)} × ${m(i.E, 4)}${fee(r.costs.entry)}`)],
+    ['Planned loss (stop fills exactly)', mono(`<span style="color:#f85149">−${m(r.plannedLoss)}</span>`), mono(m(r.plannedLossPct) + '%'),
+      mono(`${m(r.shares, 0)} × (${m(i.E, 4)} − ${m(i.S, 4)})${fee(r.costs.entry + r.costs.exitStop)}`)],
+    ['Potential gross profit (at target)', mono(`<span style="color:#3fb950">+${m(r.grossProfit)}</span>`), mono(m(r.grossProfit / i.A * 100) + '%'),
+      mono(`${m(r.shares, 0)} × (${m(i.T, 4)} − ${m(i.E, 4)})`)],
+    ...(feeOn ? [['Potential net profit (after fees)', mono(`${r.netProfit >= 0 ? '+' : '−'}${m(Math.abs(r.netProfit))}`), mono(m(r.netProfit / i.A * 100) + '%'),
+      mono(`${m(r.grossProfit)} − fees ${m(r.costs.entry + r.costs.exitTarget)}`)]] : []),
+    ['Reward-to-risk', mono(`<strong>${m(r.rrGross)}</strong>${feeOn && r.rrNet != null ? ` <span class="research-muted">(${m(r.rrNet)} after fees)</span>` : ''}`), '',
+      mono(`(${m(i.T, 4)} − ${m(i.E, 4)}) ÷ (${m(i.E, 4)} − ${m(i.S, 4)})`)],
+  ]);
+
+  html += '<h4>How the share count was found</h4>' + researchTable(['Limit', 'Budget', 'Per share', 'Max whole shares'], [
+    ['Risk limit', mono(`${m(i.R)}% × ${m(i.A)} = ${m(r.riskBudget)}${i.C > 0 ? ` − fixed fees ${m(2 * i.C)}` : ''}`),
+      mono(`${m(r.lossPerShare, 4)} loss${i.F > 0 ? ' incl. % fees' : ''}`), mono(`<strong>${m(r.byRisk, 0)}</strong>`)],
+    ['Allocation cap', mono(`${m(i.Y)}% × ${m(i.A)} = ${m(r.allocCap)}${i.C > 0 ? ` − entry fee ${m(i.C)}` : ''}`),
+      mono(`${m(i.E * (1 + i.F), 4)} cost`), mono(`<strong>${m(r.byAlloc, 0)}</strong>`)],
+  ]);
+  html += `<div class="research-muted">Position = the smaller of the two, rounded down to whole shares. No leverage: the allocation cap can't exceed 100% of the account.</div>`;
+
+  if (r.warnings.length) html += `<ul style="color:#e3b341;margin-top:8px">${r.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`;
+
+  if (r.shares > 0) html += `<h4>If the price gaps past the stop</h4>
+    <div>Illustration: if the stock opened at ${mono(m(r.gapFill, 4))} (one stop-distance below your stop, e.g. after bad earnings news),
+    a stop order would fill near there, not at ${mono(m(i.S, 4))}. The loss would be about ${mono(`<span style="color:#f85149">−${m(r.gapLoss)}</span>`)}
+    (${m(r.gapLossPct)}% of the account), roughly ${m(r.gapLoss / Math.max(r.plannedLoss, 1e-9), 1)}× the planned loss.</div>`;
+
+  html += `<h4>Why a stop-loss can't guarantee your exit price</h4><ul>
+    <li><strong>Gap risk:</strong> prices can jump between one trade and the next, most often overnight or over a weekend, around earnings, or on news.
+      If the stock opens below your stop, there was never a moment when it traded at your stop price.</li>
+    <li><strong>A stop is a trigger, not a fill:</strong> a stop-market order becomes a market order once the stop price is touched, and fills at the next available price,
+      which can be lower. A stop-limit order sets a floor price but may not fill at all if the price falls straight through it, leaving you still holding the shares.</li>
+    <li><strong>Slippage:</strong> even without a gap, fast markets, thin trading or a large order can fill at worse prices than the last quote,
+      on the way in and on the way out. That widens the loss and narrows the profit compared with this table.</li>
+    <li><strong>Halts and after-hours:</strong> trading halts, and most brokers not running stops outside regular hours, can delay an exit until the price has moved further.</li>
+  </ul>
+  <div class="research-muted">Because of this, the "planned loss" is the loss if everything fills exactly as planned. Real losses can be larger.</div>`;
+  return html;
+}
+
 function renderSwing(r, generatedAt) {
   const cite = makeCite(r.sources);
   const when = generatedAt ? new Date(generatedAt).toLocaleString() : '';
@@ -2440,6 +2601,8 @@ function renderSwing(r, generatedAt) {
       <div><strong>Target basis:</strong> ${esc(st.target_basis)}</div>
       <div><strong>Cancel the setup if:</strong> ${esc(st.would_cancel_setup)}</div>
       ${(st.risk_factors || []).length ? `<ul>${st.risk_factors.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      ${st.valid !== false && dir === 'Long' ? `<button class="pc-size" data-e="${esc(st.entry)}" data-s="${esc(st.invalidation)}" data-t="${esc(st.target)}" data-n="${esc(st.name)}"
+        style="margin-top:6px;background:#30363d;border:none;border-radius:6px;color:#c9d1d9;padding:6px 12px;cursor:pointer;font-size:.8rem">🧮 Size this setup</button>` : ''}
     </div>`;
   });
 
@@ -2447,6 +2610,8 @@ function renderSwing(r, generatedAt) {
   html += '<div class="research-muted" style="margin-top:10px">Hypothetical scenarios for education only. Past price behaviour does not guarantee future moves, and gaps (especially around earnings) can skip straight past an invalidation level.</div>';
   html += researchSources(r.sources);
   document.getElementById('researchBody').innerHTML = html;
+  document.querySelectorAll('#researchBody .pc-size').forEach(b => b.addEventListener('click', () =>
+    openPositionCalc({entry: b.dataset.e, stop: b.dataset.s, target: b.dataset.t, from: `${b.dataset.n} setup`})));
 }
 
 function renderNewsReport(r, generatedAt) {
