@@ -47,6 +47,7 @@
     #suggestions .sym{font-weight:700;color:#58a6ff;margin-right:6px}
 
     .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .navbtns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     select,button{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer;outline:none}
     select:hover,button:hover{border-color:#58a6ff}
     #loadBtn{background:#1f6feb;border-color:#1f6feb;color:#fff;font-weight:600}
@@ -64,10 +65,23 @@
     #chartContainer{flex:1}
 
     /* ── Sidebar ── */
-    .sidebar{width:270px;background:#161b22;border-left:1px solid #30363d;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px}
+    .sidebar{width:330px;flex:none;background:#161b22;border-left:1px solid #30363d;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px}
 
     .panel{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 12px}
     .panel h3{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#8b949e;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+    /* Collapsible panels: click the title to open/close; state remembered */
+    .panel.collapsible > h3{cursor:pointer;user-select:none}
+    .panel.collapsible > h3 .ttl::before{content:'▾';display:inline-block;width:12px;color:#6b7280}
+    .panel.collapsible.collapsed > h3 .ttl::before{content:'▸'}
+    .panel.collapsed > h3{margin-bottom:0}
+    .panel.collapsed > :not(h3){display:none !important}
+    /* The Composite rating is already shown big inside the panel -- only
+       show the small title badge when the panel is closed. */
+    #analystPanel:not(.collapsed) #analystBadge{display:none}
+    .show-more{background:none;border:none;color:#58a6ff;font-size:.74rem;padding:6px 0 0;cursor:pointer}
+    .show-more:hover{text-decoration:underline}
+    .kl-price{background:#1f2937;border-radius:4px}
+    .kl-src{font-size:.68rem;color:#8b949e;text-align:right;line-height:1.25}
     .panel h3 .badge{font-size:.65rem;background:#21262d;border:1px solid #30363d;border-radius:4px;padding:1px 5px;letter-spacing:0;text-transform:none;color:#c9d1d9}
 
     .level-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:.84rem;border-bottom:1px solid #1a1f27}
@@ -93,6 +107,7 @@
     .tab.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
 
     #status{color:#8b949e;font-size:.78rem;text-align:center;padding:2px}
+    #status:empty{display:none}
     .spinner{border:3px solid #30363d;border-top-color:#58a6ff;border-radius:50%;width:24px;height:24px;animation:spin .8s linear infinite;margin:10px auto;display:none}
     @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -100,6 +115,7 @@
     #legend{font-size:.72rem;color:#8b949e;padding:3px 14px;background:#161b22;border-bottom:1px solid #21262d;display:flex;gap:14px;flex-wrap:wrap}
     #legend span{display:flex;align-items:center;gap:4px}
     #legend .dot2{width:22px;height:2px}
+    #legend span[data-g].off{display:none}
 
     /* Fresh badge */
     .fresh-tag{font-size:.65rem;background:#0d2a14;border:1px solid #196127;border-radius:3px;color:#3fb950;padding:1px 4px;margin-left:3px}
@@ -140,10 +156,11 @@
     .analyst-rating{text-align:center;padding:8px 0 6px}
     .analyst-big{font-size:1.35rem;font-weight:800;letter-spacing:.04em}
     .analyst-score{font-size:.72rem;color:#8b949e;margin-top:2px}
-    .analyst-targets{display:flex;justify-content:space-around;padding:6px 0;border-top:1px solid #21262d;border-bottom:1px solid #21262d;margin:6px 0}
+    .analyst-targets{display:flex;justify-content:space-around;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #21262d;border-bottom:1px solid #21262d;margin:6px 0}
     .analyst-target-col{text-align:center}
     .analyst-target-lbl{font-size:.65rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em}
     .analyst-target-val{font-size:.9rem;font-weight:700;font-family:'Cascadia Code',Consolas,monospace}
+    .analyst-reason.warn{background:#3a2a0a;border:1px solid #6b4e16;border-radius:5px;padding:4px 6px;margin:2px 0 4px}
     .analyst-reason{display:flex;gap:5px;align-items:flex-start;font-size:.76rem;padding:2px 0;color:#c9d1d9;line-height:1.3}
     .analyst-reason-icon{flex-shrink:0}
     .analyst-verdict{font-size:.77rem;color:#8b949e;line-height:1.4;padding:6px 0 2px;border-top:1px solid #21262d;margin-top:4px;font-style:italic}
@@ -329,23 +346,35 @@
     .preset-btn.active{border-color:#58a6ff;background:#1f3a5f;color:#58a6ff}
 
     /* ── Mobile ── */
+    @media (min-width: 1600px) { .sidebar{width:360px} }
+
     @media (max-width: 768px) {
-      body{height:100dvh}
+      /* The page scrolls as a whole on a phone (chart, then panels, then the
+         disclaimer at the very end) instead of a fixed frame with an inner
+         scroller and a disclaimer bar pinned over the content. */
+      body{height:auto;min-height:100dvh;overflow:auto}
       header{padding:8px 10px;gap:8px}
       header h1{font-size:1rem}
       header h1 svg{width:24px;height:18px}
       .search-wrap{max-width:none;flex:1 1 100%;order:1}
       .controls{flex:1 1 100%;order:2;gap:6px}
       .controls select, .controls button{padding:5px 8px;font-size:.78rem}
+      /* One swipeable row of feature buttons instead of three wrapped rows */
+      .navbtns{order:3;flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;gap:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+      .navbtns::-webkit-scrollbar{display:none}
+      .navbtns button{flex:none;white-space:nowrap;padding:5px 9px;font-size:.78rem}
+      #legend{display:none}
 
-      .main{flex-direction:column;overflow-y:auto}
-      .chart-area{min-height:340px;flex:none}
-      #chartContainer{min-height:280px}
+      .main{flex-direction:column;overflow:visible}
+      .chart-area{height:62dvh;min-height:360px;flex:none}
+      #chartContainer{min-height:0}
+      #rsiContainer{height:60px}
+      #priceBar{gap:6px 12px;padding:6px 10px}
       .sidebar{width:100%;border-left:none;border-top:1px solid #30363d;max-height:none;overflow-y:visible}
 
       /* Modals go near-fullscreen so tables/forms have room to breathe */
-      #screenerModal, #arkModal, #trackModal, #myPortfolioModal{width:100%;max-width:100%;height:100dvh;max-height:100dvh;border-radius:0}
-      #screenerHead h2, #arkHead h2, #trackHead h2, #myPortfolioHead h2{font-size:.85rem}
+      #screenerModal, #arkModal, #trackModal, #myPortfolioModal, #researchModal{width:100%;max-width:100%;height:100dvh;max-height:100dvh;border-radius:0}
+      #screenerHead h2, #arkHead h2, #trackHead h2, #myPortfolioHead h2, #researchHead h2{font-size:.85rem}
       #screenerControls{flex-direction:column;align-items:stretch}
       #watchlistInput{min-width:0}
 
@@ -398,6 +427,8 @@
       <option value="15m">15 Min</option>
     </select>
     <button id="loadBtn">Load</button>
+  </div>
+  <div class="navbtns">
     <button id="screenerBtn">🔍 Screener</button>
     <button id="arkBtn">🐋 ARK Trades</button>
     <button id="trackBtn">📈 Track Record</button>
@@ -598,17 +629,17 @@
 </div>
 
 <div id="legend">
-  <span><span class="dot2" style="background:#e3b341"></span>Pivot</span>
-  <span><span class="dot2" style="background:#f85149;height:2px;border-top:2px dashed #f85149;background:none"></span>Fractal Res</span>
-  <span><span class="dot2" style="background:#3fb950;height:2px;border-top:2px dashed #3fb950;background:none"></span>Fractal Sup</span>
-  <span><span class="dot2" style="background:#f8a723"></span>Volume Profile</span>
-  <span><span class="dot2" style="background:#a5b4fc;opacity:.7"></span>Round#</span>
-  <span><span class="dot2" style="background:#c084fc"></span>Period H/L</span>
-  <span><span class="dot2" style="background:#22d3ee"></span>SMA20</span>
-  <span><span class="dot2" style="background:#facc15"></span>SMA50</span>
-  <span><span class="dot2" style="background:#a78bfa"></span>SMA200</span>
-  <span><span class="dot2" style="background:#3fb950;height:3px"></span>Buy Zone</span>
-  <span><span class="dot2" style="background:#f85149;height:3px"></span>Sell Zone</span>
+  <span data-g="pivot"><span class="dot2" style="background:#e3b341"></span>Pivot</span>
+  <span data-g="fractal"><span class="dot2" style="background:#f85149;height:2px;border-top:2px dashed #f85149;background:none"></span>Fractal Res</span>
+  <span data-g="fractal"><span class="dot2" style="background:#3fb950;height:2px;border-top:2px dashed #3fb950;background:none"></span>Fractal Sup</span>
+  <span data-g="vp"><span class="dot2" style="background:#f8a723"></span>Volume Profile</span>
+  <span data-g="round"><span class="dot2" style="background:#a5b4fc;opacity:.7"></span>Round#</span>
+  <span data-g="period"><span class="dot2" style="background:#c084fc"></span>Period H/L</span>
+  <span data-g="ma"><span class="dot2" style="background:#22d3ee"></span>SMA20</span>
+  <span data-g="ma"><span class="dot2" style="background:#facc15"></span>SMA50</span>
+  <span data-g="ma"><span class="dot2" style="background:#a78bfa"></span>SMA200</span>
+  <span data-g="signal"><span class="dot2" style="background:#3fb950;height:3px"></span>Buy Zone</span>
+  <span data-g="signal"><span class="dot2" style="background:#f85149;height:3px"></span>Sell Zone</span>
 </div>
 
 <div class="main">
@@ -631,40 +662,25 @@
     <div class="spinner" id="spinner"></div>
     <div id="status">Enter a symbol and press Load.</div>
 
-    <!-- Visibility toggles -->
-    <div class="panel">
-      <h3>Visibility</h3>
-      <div class="toggle-grid">
-        <label class="toggle-row"><input type="checkbox" id="chkPivot"> Pivot Points</label>
-        <label class="toggle-row"><input type="checkbox" id="chkFractal"> Fractal S/R</label>
-        <label class="toggle-row"><input type="checkbox" id="chkVP"> Vol Profile</label>
-        <label class="toggle-row"><input type="checkbox" id="chkMA"      checked> Moving Avgs</label>
-        <label class="toggle-row"><input type="checkbox" id="chkRound"> Round Nums</label>
-        <label class="toggle-row"><input type="checkbox" id="chkPeriod"> Period H/L</label>
-        <label class="toggle-row"><input type="checkbox" id="chkVolume"  checked> Volume Bars</label>
-        <label class="toggle-row"><input type="checkbox" id="chkSignals" checked> Buy/Sell Zones</label>
-      </div>
-    </div>
-
-    <!-- Analyst Rating -->
-    <div class="panel" id="analystPanel">
-      <h3>Composite Analyst <span class="badge" id="analystBadge">—</span></h3>
+    <!-- Composite Analyst: the site's rule-based verdict -->
+    <div class="panel collapsible" data-key="analyst" id="analystPanel">
+      <h3><span class="ttl">Composite Analyst</span> <span class="badge" id="analystBadge">—</span></h3>
       <div id="analystContent"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
     </div>
 
     <!-- AI Analyst — independent Claude-generated verdict, for comparison
          against the rule-based Composite Analyst above. Hidden entirely
          for logged-out visitors (gated server-side too, in /api/stock). -->
-    <div class="panel" id="aiAnalystPanel" style="display:none">
-      <h3>AI Analyst <span class="badge" id="aiAnalystBadge">—</span></h3>
+    <div class="panel collapsible" data-key="ai" id="aiAnalystPanel" style="display:none">
+      <h3><span class="ttl">AI Analyst</span> <span class="badge" id="aiAnalystBadge">—</span></h3>
       <div style="font-size:.65rem;color:#8b949e;margin-top:-6px;margin-bottom:4px">Claude &middot; cached, updates daily</div>
       <div id="aiAnalystContent"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
     </div>
 
     <!-- Equity Research — on-demand fundamental report (Claude + web
          search). Logged-in only, like the AI Analyst. -->
-    <div class="panel" id="researchPanel" style="display:none">
-      <h3>Equity Research</h3>
+    <div class="panel collapsible" data-key="research" id="researchPanel" style="display:none">
+      <h3><span class="ttl">Equity Research</span></h3>
       <div style="font-size:.72rem;color:#8b949e;margin-bottom:8px;line-height:1.45">AI-written fundamental reports with sources. Takes 1–3 min the first time; cached for a week.</div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <select id="researchType">
@@ -696,81 +712,57 @@
       </div>
     </div>
 
-    <!-- Trade Signals -->
-    <div class="panel">
-      <h3>Trade Signals <span class="badge" id="signalBadge">—</span></h3>
+    <!-- Trade Signals: best-rated zones first, the rest behind "show all" -->
+    <div class="panel collapsible" data-key="signals">
+      <h3><span class="ttl">Trade Signals</span> <span class="badge" id="signalBadge">—</span></h3>
       <div id="signalLevels"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol to see signals.</div></div>
     </div>
 
-    <!-- Market Context -->
-    <div class="panel">
-      <h3>Market Context <span class="badge" id="ctxBadge">—</span></h3>
-      <div id="ctxLevels"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
-    </div>
-
-    <!-- News -->
-    <div class="panel">
-      <h3>Latest News <span class="badge" id="newsBadge">—</span></h3>
+    <!-- News: 3 headlines, rest behind "show all" -->
+    <div class="panel collapsible" data-key="news">
+      <h3><span class="ttl">Latest News</span> <span class="badge" id="newsBadge">—</span></h3>
       <div id="newsLevels"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
     </div>
 
-    <!-- Candlestick Patterns -->
-    <div class="panel">
-      <h3>Price Action Patterns <span class="badge" id="patternBadge">—</span></h3>
-      <div id="patternLevels"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
-    </div>
-
-    <!-- Momentum (RSI / MACD) -->
-    <div class="panel">
-      <h3>Momentum <span class="badge" id="momentumBadge">—</span></h3>
+    <!-- Momentum + latest candle pattern (was two panels) -->
+    <div class="panel collapsible collapsed" data-key="momentum">
+      <h3><span class="ttl">Momentum &amp; Candles</span> <span class="badge" id="momentumBadge">—</span></h3>
       <div id="momentumLevels"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
+      <div id="patternLevels" style="margin-top:6px"></div>
     </div>
 
-    <!-- Pivot Points -->
-    <div class="panel">
-      <h3>Pivot Points <span class="badge" id="pivotLabel">Classic</span></h3>
+    <!-- Key Levels: pivots, fractal S/R, volume profile, period highs/lows
+         and moving averages in ONE price-sorted ladder (was five panels) -->
+    <div class="panel collapsible collapsed" data-key="levels">
+      <h3><span class="ttl">Key Levels</span> <span class="badge" id="levelsBadge">—</span></h3>
       <div class="tabs">
-        <div class="tab active" data-ptype="classic">Classic</div>
-        <div class="tab"       data-ptype="fibonacci">Fibonacci</div>
+        <div class="tab active" data-ptype="classic">Classic pivots</div>
+        <div class="tab"       data-ptype="fibonacci">Fibonacci pivots</div>
       </div>
-      <div id="pivotLevels"></div>
-    </div>
-
-    <!-- Fractal S/R -->
-    <div class="panel">
-      <h3>Fractal S/R <span class="badge">ATR-scored</span></h3>
-      <div id="fractalLevels"></div>
-    </div>
-
-    <!-- Volume Profile -->
-    <div class="panel">
-      <h3>Volume Profile <span class="badge">200-bin</span></h3>
-      <div id="vpLevels"></div>
-    </div>
-
-    <!-- Moving Averages -->
-    <div class="panel">
-      <h3>Moving Averages</h3>
-      <div id="maLevels"></div>
-    </div>
-
-    <!-- Period Levels -->
-    <div class="panel">
-      <h3>Period Highs / Lows</h3>
-      <div id="periodLevels"></div>
-    </div>
-
-    <!-- Round Numbers -->
-    <div class="panel">
-      <h3>Psychological Levels</h3>
-      <div id="roundLevels"></div>
+      <div id="keyLevels"></div>
     </div>
 
     <!-- Fundamentals (Buffett metrics) -->
-    <div class="panel">
-      <h3>Fundamentals <span class="badge" id="fundsBadge">—</span></h3>
+    <div class="panel collapsible collapsed" data-key="funds">
+      <h3><span class="ttl">Fundamentals</span> <span class="badge" id="fundsBadge">—</span></h3>
       <div id="fundsLevels"><div style="color:#8b949e;font-size:.8rem;padding:4px 0">Load a symbol.</div></div>
     </div>
+
+    <!-- Visibility toggles -->
+    <div class="panel collapsible collapsed" data-key="visibility">
+      <h3><span class="ttl">Chart lines</span></h3>
+      <div class="toggle-grid">
+        <label class="toggle-row"><input type="checkbox" id="chkPivot"> Pivot Points</label>
+        <label class="toggle-row"><input type="checkbox" id="chkFractal"> Fractal S/R</label>
+        <label class="toggle-row"><input type="checkbox" id="chkVP"> Vol Profile</label>
+        <label class="toggle-row"><input type="checkbox" id="chkMA"      checked> Moving Avgs</label>
+        <label class="toggle-row"><input type="checkbox" id="chkRound"> Round Nums</label>
+        <label class="toggle-row"><input type="checkbox" id="chkPeriod"> Period H/L</label>
+        <label class="toggle-row"><input type="checkbox" id="chkVolume"  checked> Volume Bars</label>
+        <label class="toggle-row"><input type="checkbox" id="chkSignals" checked> Buy/Sell Zones</label>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -887,6 +879,8 @@ function applyVisibility() {
     });
   });
   volumeSeries.applyOptions({ visible: document.getElementById('chkVolume').checked });
+  // Legend lists only the line types currently drawn.
+  document.querySelectorAll('#legend span[data-g]').forEach(sp => sp.classList.toggle('off', !show[sp.dataset.g]));
   Object.entries(maSeries).forEach(([name, s]) => {
     s.applyOptions({ visible: show.ma });
   });
@@ -896,11 +890,36 @@ function applyVisibility() {
   document.getElementById(id).addEventListener('change', applyVisibility);
 });
 
+applyVisibility();   // sync the legend with the default toggles before the first load
+
+// Collapsible sidebar panels: click a title to open/close; the choice is
+// remembered in this browser (localStorage only).
+(() => {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('gcp_panels') || '{}'); } catch (e) { /* ignore */ }
+  document.querySelectorAll('.panel.collapsible').forEach(p => {
+    const key = p.dataset.key;
+    if (key in saved) p.classList.toggle('collapsed', !!saved[key]);
+    p.querySelector(':scope > h3').addEventListener('click', e => {
+      if (e.target.closest('.tab, button, select, input')) return;
+      p.classList.toggle('collapsed');
+      saved[key] = p.classList.contains('collapsed');
+      try { localStorage.setItem('gcp_panels', JSON.stringify(saved)); } catch (err) { /* ignore */ }
+    });
+  });
+})();
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  Sidebar helpers
 // ══════════════════════════════════════════════════════════════════════════════
+// Prices: 2 decimals (4 only for sub-$1 prices, where 2 would hide the move).
+function fmtPx(v) {
+  if (typeof v !== 'number' || !isFinite(v)) return v;
+  return Math.abs(v) >= 1 ? v.toFixed(2) : v.toFixed(4);
+}
+
 function row(label, value, cls, extra='') {
-  const fmtVal = typeof value === 'number' ? value.toFixed(4) : value;
+  const fmtVal = typeof value === 'number' ? fmtPx(value) : value;
   return `<div class="level-row">
     <span class="lbl">${label}${extra}</span>
     <span class="val ${cls}">${fmtVal}</span>
@@ -917,103 +936,52 @@ function strengthDots(n, cls) {
 let _pivotData   = null;
 let _activePType = 'classic';
 
-function renderPivot(pivotData, ptype) {
-  const pp = pivotData[ptype];
-  const el = document.getElementById('pivotLevels');
-  el.innerHTML =
-    row('R3', pp.R3, 'res') +
-    row('R2', pp.R2, 'res') +
-    row('R1', pp.R1, 'res') +
-    row('PP', pp.PP, 'piv') +
-    row('S1', pp.S1, 'sup') +
-    row('S2', pp.S2, 'sup') +
-    row('S3', pp.S3, 'sup');
-}
+// One price-sorted ladder of every reference level. Levels within 0.1% of
+// each other are merged into one row ("Fractal S1 · Prev week low"), the
+// current price sits in the ladder, and only the nearest few each side are
+// shown until "show all".
+let _levelsShowAll = false;
+function renderKeyLevels(data, ptype) {
+  const el = document.getElementById('keyLevels');
+  const price = data.meta.price;
+  const L = [];
+  const add = (v, label, kind) => { if (typeof v === 'number' && isFinite(v)) L.push({v, label, kind}); };
+  const pp = data.pivot[ptype] || {};
+  const pname = ptype === 'classic' ? 'Pivot' : 'Fib pivot';
+  ['R3','R2','R1','PP','S1','S2','S3'].forEach(k => add(pp[k], `${pname} ${k}`, 'piv'));
+  [...(data.fractals.resistance || [])].sort((x, y) => x.price - y.price).forEach((r, i) => add(r.price, `Fractal R${i+1} ${'●'.repeat(r.strength || 1)}`, 'fr'));
+  [...(data.fractals.support || [])].sort((x, y) => y.price - x.price).forEach((r, i) => add(r.price, `Fractal S${i+1} ${'●'.repeat(r.strength || 1)}`, 'fr'));
+  const vp = data.volume_profile || {};
+  add(vp.poc, 'Volume POC', 'vp'); add(vp.vah, 'Value area high', 'vp'); add(vp.val, 'Value area low', 'vp');
+  const pl = data.period_levels || {};
+  const pn = {prev_week_high: 'Prev week high', prev_week_low: 'Prev week low', prev_month_high: 'Prev month high',
+              prev_month_low: 'Prev month low', period_high: 'Period high', period_low: 'Period low'};
+  Object.keys(pn).forEach(k => add(pl[k], pn[k], 'per'));
+  const mas = data.moving_averages || {};
+  ['SMA20','SMA50','SMA200','EMA9','EMA21'].forEach(k => add(mas[k], k, 'ma'));
 
-function renderFractals(f) {
-  const el = document.getElementById('fractalLevels');
-  let html = '';
-  const resList = [...f.resistance].sort((a,b) => b.price - a.price);
-  const supList = [...f.support].sort((a,b) => b.price - a.price);
-
-  resList.forEach((r,i) => {
-    const fresh = r.fresh ? `<span class="fresh-tag res">fresh</span>` : '';
-    html += `<div class="level-row">
-      <span class="lbl">R${i+1} ${strengthDots(r.strength,'res')}${fresh}</span>
-      <span class="val res">${r.price.toFixed(4)}</span>
-    </div>`;
+  L.sort((x, y) => y.v - x.v);
+  const merged = [];
+  L.forEach(x => {
+    const last = merged[merged.length - 1];
+    if (last && Math.abs(last.v - x.v) / price < 0.001) { last.labels.push(x.label); }
+    else merged.push({v: x.v, labels: [x.label]});
   });
-  supList.forEach((s,i) => {
-    const fresh = s.fresh ? `<span class="fresh-tag">fresh</span>` : '';
-    html += `<div class="level-row">
-      <span class="lbl">S${i+1} ${strengthDots(s.strength,'sup')}${fresh}</span>
-      <span class="val sup">${s.price.toFixed(4)}</span>
-    </div>`;
-  });
-
-  el.innerHTML = html || '<div style="color:#8b949e;font-size:.8rem;padding:4px 0">Insufficient data</div>';
-}
-
-function renderVP(vp) {
-  const el = document.getElementById('vpLevels');
-  let html = '';
-  html += row('POC', vp.poc, 'vol', ' <span style="font-size:.65rem;color:#8b949e">highest vol</span>');
-  html += row('VAH', vp.vah, 'vol');
-  html += row('VAL', vp.val, 'vol');
-  vp.hvn.forEach((v,i) => { html += row(`HVN${i+1}`, v, 'vol'); });
-  vp.lvn.forEach((v,i) => { html += row(`LVN${i+1}`, v, 'rnd', ' <span style="font-size:.65rem;color:#8b949e">thin</span>'); });
+  const above = merged.filter(m => m.v > price), below = merged.filter(m => m.v <= price);
+  const N = 6;
+  const showA = _levelsShowAll ? above : above.slice(-N), showB = _levelsShowAll ? below : below.slice(0, N);
+  const line = (m, cls) => `<div class="level-row"><span class="val ${cls}">${fmtPx(m.v)}</span>
+    <span class="kl-src">${m.labels.join(' · ')}<br><span style="color:#6b7280">${m.v > price ? '+' : ''}${((m.v / price - 1) * 100).toFixed(1)}%</span></span></div>`;
+  let html = showA.map(m => line(m, 'res')).join('');
+  html += `<div class="level-row kl-price"><span class="val" style="color:#c9d1d9">▶ ${fmtPx(price)}</span><span class="kl-src" style="color:#c9d1d9">current price</span></div>`;
+  html += showB.map(m => line(m, 'sup')).join('');
+  const hidden = above.length + below.length - showA.length - showB.length;
+  if (hidden > 0 || _levelsShowAll) html += `<button class="show-more" id="levelsMore">${_levelsShowAll ? 'Show nearest only' : `Show all ${merged.length} levels`}</button>`;
+  html += '<div style="font-size:.66rem;color:#6b7280;margin-top:4px">Round-number and volume-node lines can still be drawn on the chart under Chart lines.</div>';
   el.innerHTML = html;
-}
-
-function renderMA(mas, price) {
-  const el = document.getElementById('maLevels');
-  const order = ['SMA20','SMA50','SMA200','EMA9','EMA21'];
-  const colors = { SMA20:'#22d3ee', SMA50:'#facc15', SMA200:'#a78bfa', EMA9:'#86efac', EMA21:'#fca5a5' };
-  let html = '';
-  order.forEach(name => {
-    if (mas[name] !== undefined) {
-      const v    = mas[name];
-      const diff = ((price - v) / price * 100).toFixed(2);
-      const cls  = price > v ? 'sup' : 'res';
-      const sign = price > v ? '↑' : '↓';
-      html += `<div class="level-row">
-        <span class="lbl" style="color:${colors[name]||'#c9d1d9'}">${name}</span>
-        <span class="val ${cls}">${v.toFixed(2)} <span style="font-size:.7rem;color:#8b949e">${sign}${Math.abs(diff)}%</span></span>
-      </div>`;
-    }
-  });
-  el.innerHTML = html || '<div style="color:#8b949e;font-size:.8rem">Not enough data</div>';
-}
-
-function renderPeriod(p) {
-  const el = document.getElementById('periodLevels');
-  const labels = {
-    period_high:'Period High', period_low:'Period Low',
-    prev_week_high:'Prev Wk H', prev_week_low:'Prev Wk L',
-    prev_month_high:'Prev Mo H', prev_month_low:'Prev Mo L',
-  };
-  let html = '';
-  ['prev_month_high','prev_week_high','period_high','period_low','prev_week_low','prev_month_low'].forEach(k => {
-    if (p[k] !== undefined) {
-      const cls = k.includes('high') ? 'per res' : 'per sup';
-      html += row(labels[k], p[k], cls);
-    }
-  });
-  el.innerHTML = html;
-}
-
-function renderRound(rounds, price) {
-  const el = document.getElementById('roundLevels');
-  let html = '';
-  [...rounds].sort((a,b) => b - a).forEach(v => {
-    const cls = v > price ? 'rnd res' : v < price ? 'rnd sup' : 'rnd piv';
-    const dist = ((Math.abs(v - price) / price) * 100).toFixed(1);
-    html += `<div class="level-row">
-      <span class="lbl" style="color:#a5b4fc">${v.toFixed(v < 10 ? 2 : 0)}</span>
-      <span class="val ${cls}" style="font-size:.8rem">${dist}% away</span>
-    </div>`;
-  });
-  el.innerHTML = html;
+  document.getElementById('levelsBadge').textContent = `${merged.length}`;
+  const more = document.getElementById('levelsMore');
+  if (more) more.addEventListener('click', e => { e.stopPropagation(); _levelsShowAll = !_levelsShowAll; renderKeyLevels(data, ptype); });
 }
 
 function starsHtml(n, color) {
@@ -1023,24 +991,35 @@ function starsHtml(n, color) {
   ).join('');
 }
 
+// Zones rated 2★+ are shown; 1★ zones (single-source levels) sit behind
+// "show all" -- unless a side has nothing better, then its best one shows.
+let _signalsShowAll = false;
 function renderSignals(signals) {
   const el    = document.getElementById('signalLevels');
   const badge = document.getElementById('signalBadge');
   const total = signals.buy.length + signals.sell.length;
   badge.textContent = total ? `${signals.sell.length}S · ${signals.buy.length}B` : '—';
+  const pick = zones => {
+    if (_signalsShowAll) return zones;
+    const good = zones.filter(z => (z.stars || 1) >= 2);
+    return good.length ? good : zones.slice(0, 1);
+  };
+  const sells = pick([...signals.sell].sort((a,b) => a.price - b.price));
+  const buys  = pick([...signals.buy].sort((a,b) => b.price - a.price));
+  const hiddenCount = total - sells.length - buys.length;
 
   let html = '';
 
-  if (signals.sell.length) {
+  if (sells.length) {
     html += `<div class="sig-hdr" style="color:#f85149">Sell Zones</div>`;
-    [...signals.sell].sort((a,b) => a.price - b.price).forEach(s => {
+    sells.forEach(s => {
       const dist   = s.dist_pct < 0.1 ? 'at level' : `+${s.dist_pct.toFixed(1)}%`;
       const stars  = s.stars || 1;
       const sc     = stars >= 4 ? '#f85149' : stars >= 3 ? '#e3b341' : '#8b949e';
       const rrColor= (s.rr||0) >= 2 ? '#3fb950' : '#e3b341';
       html += `<div class="sig-row">
         <div class="sig-top">
-          <span class="val res">${s.price.toFixed(4)}</span>
+          <span class="val res">${fmtPx(s.price)}</span>
           <span style="display:flex;gap:5px;align-items:center">
             <span>${starsHtml(stars, sc)}</span>
             <span class="badge-sell">${s.confluence}×</span>
@@ -1051,22 +1030,21 @@ function renderSignals(signals) {
           &nbsp;Target <span style="color:#3fb950">${s.target.toFixed(2)}</span>
           &nbsp;<span style="color:${rrColor}">R:R ${(s.rr||0).toFixed(1)}:1</span></div>` : ''}
         <div class="sig-src">${(s.sources||[]).join(' · ')}</div>
-        ${(s.factors||[]).length ? `<div class="sig-factors">${s.factors.join(' · ')}</div>` : ''}
       </div>`;
     });
   }
 
-  if (signals.buy.length) {
-    const mt = signals.sell.length ? 'margin-top:8px;' : '';
+  if (buys.length) {
+    const mt = sells.length ? 'margin-top:8px;' : '';
     html += `<div class="sig-hdr" style="color:#3fb950;${mt}">Buy Zones</div>`;
-    [...signals.buy].sort((a,b) => b.price - a.price).forEach(s => {
+    buys.forEach(s => {
       const dist   = s.dist_pct < 0.1 ? 'at level' : `-${s.dist_pct.toFixed(1)}%`;
       const stars  = s.stars || 1;
       const sc     = stars >= 4 ? '#3fb950' : stars >= 3 ? '#e3b341' : '#8b949e';
       const rrColor= (s.rr||0) >= 2 ? '#3fb950' : '#e3b341';
       html += `<div class="sig-row">
         <div class="sig-top">
-          <span class="val sup">${s.price.toFixed(4)}</span>
+          <span class="val sup">${fmtPx(s.price)}</span>
           <span style="display:flex;gap:5px;align-items:center">
             <span>${starsHtml(stars, sc)}</span>
             <span class="badge-buy">${s.confluence}×</span>
@@ -1077,15 +1055,18 @@ function renderSignals(signals) {
           &nbsp;Target <span style="color:#3fb950">${s.target.toFixed(2)}</span>
           &nbsp;<span style="color:${rrColor}">R:R ${(s.rr||0).toFixed(1)}:1</span></div>` : ''}
         <div class="sig-src">${(s.sources||[]).join(' · ')}</div>
-        ${(s.factors||[]).length ? `<div class="sig-factors">${s.factors.join(' · ')}</div>` : ''}
       </div>`;
     });
   }
 
   if (!total) {
     html = `<div style="color:#8b949e;font-size:.8rem;padding:4px 0">No confluence zones detected.</div>`;
+  } else if (hiddenCount > 0 || _signalsShowAll) {
+    html += `<button class="show-more" id="signalsMore">${_signalsShowAll ? 'Show best-rated only' : `Show all ${total} zones (+${hiddenCount} rated 1★)`}</button>`;
   }
   el.innerHTML = html;
+  const more = document.getElementById('signalsMore');
+  if (more) more.addEventListener('click', () => { _signalsShowAll = !_signalsShowAll; renderSignals(signals); });
 }
 
 function renderAnalyst(analyst, sentiment) {
@@ -1111,7 +1092,9 @@ function renderAnalyst(analyst, sentiment) {
   const sentLabel   = (sentiment && sentiment.label)  || 'Neutral';
   const sentPct     = Math.round(((sentScore + 1) / 2) * 100);  // −1→0%, +1→100%
   const sentColor   = sentScore >= 0.15 ? '#3fb950' : sentScore <= -0.15 ? '#f85149' : '#e3b341';
-  const reasonIcons = ['📊','📈','💹','📰','📋','🕯️'];
+  // Icon by topic, not by position (a warning line can be inserted first).
+  const reasonIcon = r => r.startsWith('⚠') ? '⚠️' : /^Stage/.test(r) ? '📊' : /^RSI/.test(r) ? '📈'
+    : /^(MACD|Volume)/.test(r) ? '💹' : /^News/.test(r) ? '📰' : /^Fundamentals/.test(r) ? '📋' : /^Pattern/.test(r) ? '🕯️' : '•';
 
   // Target/stop prices
   const hasTargets = analyst.best_buy_price || analyst.target || analyst.stop;
@@ -1135,7 +1118,7 @@ function renderAnalyst(analyst, sentiment) {
         <div class="analyst-target-lbl">Target</div>
         <div class="analyst-target-val" style="color:#58a6ff">${analyst.target.toFixed(2)}</div>
       </div>` : ''}
-      ${analyst.best_sell_price ? `<div class="analyst-target-col">
+      ${analyst.best_sell_price && !(analyst.target && Math.abs(analyst.best_sell_price - analyst.target) < 0.005) ? `<div class="analyst-target-col">
         <div class="analyst-target-lbl">Sell Zone</div>
         <div class="analyst-target-val res">${analyst.best_sell_price.toFixed(2)}</div>
       </div>` : ''}
@@ -1157,11 +1140,12 @@ function renderAnalyst(analyst, sentiment) {
                   r.includes('bullish crossover') || r.includes('expanding') || r.includes('quality');
     const isNeg = r.includes('Stage 4') || r.includes('Stage 3') || r.includes('Negative') ||
                   r.includes('negative') || r.includes('overbought') || r.includes('bearish') ||
-                  r.includes('avoid') || r.includes('Weak') || r.includes('weak');
-    const col   = isPos ? '#3fb950' : isNeg ? '#f85149' : '#c9d1d9';
-    html += `<div class="analyst-reason">
-      <span class="analyst-reason-icon">${reasonIcons[i]||'•'}</span>
-      <span style="color:${col}">${r}</span>
+                  r.includes('avoid') || r.includes('Weak') || r.includes('weak') || r.includes('selling pressure');
+    const warn  = r.startsWith('⚠');
+    const col   = warn ? '#e3b341' : isPos ? '#3fb950' : isNeg ? '#f85149' : '#c9d1d9';
+    html += `<div class="analyst-reason${warn ? ' warn' : ''}">
+      <span class="analyst-reason-icon">${reasonIcon(r)}</span>
+      <span style="color:${col}">${warn ? r.replace(/^⚠\s*/, '') : r}</span>
     </div>`;
   });
 
@@ -1208,30 +1192,6 @@ function renderAIAnalyst(aiAnalyst) {
     <div class="analyst-verdict">"${aiAnalyst.verdict}"</div>`;
 }
 
-function renderContext(bullets, stage) {
-  const el    = document.getElementById('ctxLevels');
-  const badge = document.getElementById('ctxBadge');
-  if (!bullets || !bullets.length) {
-    badge.textContent = '—';
-    el.innerHTML = `<div style="color:#8b949e;font-size:.8rem">No context available.</div>`;
-    return;
-  }
-  const stg = stage ? stage.stage : 0;
-  badge.textContent = stg === 2 ? 'Bullish' : stg === 4 ? 'Bearish' : stg === 3 ? 'Caution' : 'Neutral';
-  badge.style.color = stg === 2 ? '#3fb950' : stg === 4 ? '#f85149' : stg === 3 ? '#f8a723' : '#8b949e';
-
-  const icons = ['📊','📈','📉','⚡','🕯️','💡'];
-  let html = '';
-  bullets.forEach((b, i) => {
-    const isUp   = b.includes('↑') || b.includes('bullish') || b.includes('Uptrend') || b.includes('surge') || b.includes('Rising') || b.includes('buying');
-    const isDown = b.includes('↓') || b.includes('bearish') || b.includes('Downtrend') || b.includes('selling') || b.includes('Declining') || b.includes('overbought');
-    const col    = isUp ? '#3fb950' : isDown ? '#f85149' : '#c9d1d9';
-    html += `<div class="ctx-bullet"><span class="ctx-icon">${icons[i]||'•'}</span>
-      <span style="color:${col}">${b}</span></div>`;
-  });
-  el.innerHTML = html;
-}
-
 function timeAgo(ts) {
   if (!ts) return '';
   const secs = Math.floor(Date.now() / 1000 - ts);
@@ -1255,13 +1215,14 @@ function renderNews(articles, sentiment) {
   badge.style.color = sentColor;
 
   let html = '';
-  articles.forEach(a => {
+  const NEWS_SHOWN = 3;
+  articles.forEach((a, idx) => {
     const ago   = timeAgo(a.time);
     const href  = a.link ? `href="${a.link}" target="_blank" rel="noopener"` : '';
     const tone  = a.tone || 'neutral';
     const toneIcon  = tone === 'positive' ? '🟢' : tone === 'negative' ? '🔴' : '⚪';
     const toneColor = tone === 'positive' ? '#3fb950' : tone === 'negative' ? '#f85149' : '#6b7280';
-    html += `<div class="news-item">
+    html += `<div class="news-item${idx >= NEWS_SHOWN ? ' news-extra' : ''}" ${idx >= NEWS_SHOWN ? 'style="display:none"' : ''}>
       <div style="display:flex;gap:5px;align-items:flex-start">
         <span style="flex-shrink:0;margin-top:1px">${toneIcon}</span>
         <a class="news-title" ${href}>${a.title}</a>
@@ -1274,23 +1235,24 @@ function renderNews(articles, sentiment) {
       ${a.summary ? `<div class="news-summary" style="padding-left:18px">${a.summary}</div>` : ''}
     </div>`;
   });
+  if (articles.length > NEWS_SHOWN) html += `<button class="show-more" id="newsMore">Show all ${articles.length} headlines</button>`;
   el.innerHTML = html;
+  const more = document.getElementById('newsMore');
+  if (more) more.addEventListener('click', () => {
+    const open = more.dataset.open === '1';
+    el.querySelectorAll('.news-extra').forEach(n => { n.style.display = open ? 'none' : ''; });
+    more.dataset.open = open ? '0' : '1';
+    more.textContent = open ? `Show all ${articles.length} headlines` : 'Show fewer';
+  });
 }
 
 function renderPatterns(patterns) {
   const el    = document.getElementById('patternLevels');
-  const badge = document.getElementById('patternBadge');
   if (!patterns || !patterns.length) {
-    badge.textContent = 'None';
-    el.innerHTML = `<div style="color:#8b949e;font-size:.8rem;padding:4px 0">No pattern on latest candle.</div>`;
+    el.innerHTML = `<div style="color:#8b949e;font-size:.75rem;padding:4px 0">Candles: no pattern on the latest candle.</div>`;
     return;
   }
-  const bulls = patterns.filter(p => p.type === 'bullish');
-  const bears = patterns.filter(p => p.type === 'bearish');
-  const neu   = patterns.filter(p => p.type === 'neutral');
-  badge.textContent = bulls.length ? `${bulls.length}↑` : bears.length ? `${bears.length}↓` : 'Doji';
-  badge.style.color = bulls.length ? '#3fb950' : bears.length ? '#f85149' : '#8b949e';
-  let html = '';
+  let html = '<div style="font-size:.7rem;color:#8b949e;margin-bottom:3px">Candles</div>';
   patterns.forEach(p => {
     const cls  = p.type === 'bullish' ? 'pat-bull' : p.type === 'bearish' ? 'pat-bear' : 'pat-neu';
     const icon = p.type === 'bullish' ? '▲' : p.type === 'bearish' ? '▼' : '—';
@@ -1457,12 +1419,9 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     _activePType = tab.dataset.ptype;
-    document.getElementById('pivotLabel').textContent =
-      _activePType === 'classic' ? 'Classic' : 'Fibonacci';
-    if (_pivotData) {
-      renderPivot(_pivotData, _activePType);
-      // Redraw only pivot lines
-      if (window._lastData) drawLines(window._lastData);
+    if (window._lastData) {
+      renderKeyLevels(window._lastData, _activePType);
+      drawLines(window._lastData);
     }
   });
 });
@@ -1559,21 +1518,14 @@ async function loadStock() {
     renderAIAnalyst(data.ai_analyst);
     document.getElementById('researchPanel').style.display = _currentUserEmail ? '' : 'none';
     renderSignals(data.signals);
-    renderContext(data.context || [], data.stage);
     renderNews(data.news || [], data.sentiment);
     renderPatterns(data.patterns || []);
     renderMomentum(data.momentum);
-    renderPivot(data.pivot, _activePType);
-    renderFractals(data.fractals);
-    renderVP(data.volume_profile);
-    renderMA(data.moving_averages, data.meta.price);
-    renderPeriod(data.period_levels);
-    renderRound(data.round_numbers, data.meta.price);
+    renderKeyLevels(data, _activePType);
     renderFundamentals(data.fundamentals || {});
     updatePriceBar(data.meta, data.stage);
 
-    document.getElementById('status').textContent =
-      `Updated ${new Date().toLocaleTimeString()} · ${data.candles.length} bars`;
+    document.getElementById('status').textContent = '';
 
   } catch (err) {
     document.getElementById('status').textContent = `Network error: ${err.message}`;

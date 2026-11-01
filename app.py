@@ -1169,7 +1169,7 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
     elif momentum.get("macd_above") and momentum.get("hist_rising"):
         score += 1; reasons.append("MACD histogram expanding — sustained buying pressure")
     elif not momentum.get("macd_above") and not momentum.get("hist_rising"):
-        score -= 1; reasons.append("MACD histogram contracting — sustained selling pressure")
+        score -= 1; reasons.append("MACD below signal, histogram falling — selling pressure building")
 
     # ── News Sentiment ────────────────────────────────────────────────────────
     if sent_sc >= 0.4:
@@ -1292,8 +1292,25 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
             f"(risking {RISK_PER_TRADE_PCT:.0f}% of total capital to the stop) — adjust for your own risk tolerance."
         )
 
+    # The rating is a points score over trend / momentum / news /
+    # fundamentals / pattern; the best zone's reward:risk is NOT part of it
+    # (changing that would change what the published Track Record measures).
+    # So when the setup itself is poor, say so instead of calling it
+    # "high-probability" -- a STRONG BUY with a 0.8:1 entry read as a
+    # contradiction.
+    best_rr = best_buy.get("rr") if best_buy else None
+    poor_rr = best_rr is not None and best_rr < 1
+    if poor_rr:
+        reasons.insert(0, f"⚠ Best entry R:R only {best_rr:.1f}:1 — target is closer than the stop")
+
     # Closing
-    if rating in ("STRONG BUY", "BUY"):
+    if rating in ("STRONG BUY", "BUY") and poor_rr:
+        verdict_parts.append(
+            f"Overall: the trend and fundamentals score well, but the best entry offers only {best_rr:.1f}:1 "
+            "reward-to-risk — the rating describes the stock's condition, not this entry. A better entry "
+            "would be lower, or wait for a breakout to set a higher target."
+        )
+    elif rating in ("STRONG BUY", "BUY"):
         verdict_parts.append("Overall: high-probability long setup — manage risk with defined stop loss.")
     elif rating in ("STRONG SELL", "SELL"):
         verdict_parts.append("Overall: avoid long positions; existing holders should consider reducing exposure.")
@@ -1312,6 +1329,8 @@ def analyst_rating(meta, stage, momentum, signals, fundamentals, sentiment, patt
         "best_sell_price": best_sell.get("price") if best_sell else None,
         "suggested_position_pct": suggested_position_pct,
         "risk_per_trade_pct":     RISK_PER_TRADE_PCT,
+        "best_rr":  best_rr,
+        "poor_rr":  poor_rr,
     }
 
 
@@ -1490,7 +1509,7 @@ def market_context(meta, stage, momentum, patterns):
     elif momentum.get("macd_above") and momentum.get("hist_rising"):
         bullets.append("MACD histogram expanding — buying pressure increasing")
     elif not momentum.get("macd_above") and not momentum.get("hist_rising"):
-        bullets.append("MACD histogram contracting — selling pressure increasing")
+        bullets.append("MACD below signal, histogram falling — selling pressure building")
 
     # Latest candlestick pattern
     for p in patterns[:1]:
