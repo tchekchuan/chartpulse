@@ -668,6 +668,7 @@
         <select id="researchType">
           <option value="business">Business &amp; risks</option>
           <option value="financial">Financial strength</option>
+          <option value="earnings">Earnings review</option>
         </select>
         <select id="researchHorizon">
           <option value="1y">1-year horizon</option>
@@ -1993,7 +1994,8 @@ function openResearch(report, horizon) {
   const sym = currentResearchSymbol();
   if (!sym) return;
   const req = {symbol: sym, report, horizon};
-  const label = report === 'financial' ? 'Financial Strength' : `Business & Risks · ${HORIZON_LABELS[horizon]}`;
+  const label = {financial: 'Financial Strength', earnings: 'Earnings Review (latest quarter)'}[report]
+    || `Business & Risks · ${HORIZON_LABELS[horizon]}`;
   document.getElementById('researchTitle').textContent = `🔬 ${sym} — ${label}`;
   document.getElementById('researchOverlay').style.display = 'flex';
   startResearch(req, ++_researchToken);
@@ -2003,9 +2005,9 @@ function closeResearch() {
   document.getElementById('researchOverlay').style.display = 'none';
 }
 
-// A financial-strength report covers fixed periods, not a horizon.
 document.getElementById('researchType').addEventListener('change', e => {
-  document.getElementById('researchHorizon').style.display = e.target.value === 'financial' ? 'none' : '';
+  // Only the business report takes a horizon.
+  document.getElementById('researchHorizon').style.display = e.target.value === 'business' ? '' : 'none';
 });
 document.getElementById('researchOpenBtn').addEventListener('click', () =>
   openResearch(document.getElementById('researchType').value, document.getElementById('researchHorizon').value));
@@ -2035,11 +2037,13 @@ document.getElementById('researchBtn').addEventListener('click', () => {
         <button id="researchPickBiz" style="${btn};flex:1">Business &amp; risks report</button>
       </div>
       <button id="researchPickFin" style="${btn}">Financial strength report</button>
+      <button id="researchPickEarn" style="${btn}">Earnings review — latest quarter</button>
       <div class="research-muted" style="text-align:center">First run takes 1–3 minutes; after that it opens instantly for a week.</div>
     </div>`);
   document.getElementById('researchPickBiz').addEventListener('click', () =>
     openResearch('business', document.getElementById('researchPickHorizon').value));
   document.getElementById('researchPickFin').addEventListener('click', () => openResearch('financial', '3y'));
+  document.getElementById('researchPickEarn').addEventListener('click', () => openResearch('earnings', '3y'));
 });
 document.getElementById('researchClose').addEventListener('click', closeResearch);
 document.getElementById('researchOverlay').addEventListener('click', e => {
@@ -2075,9 +2079,8 @@ function handleResearch(req, token, data, polls) {
   if (token !== _researchToken) return;   // modal closed or reopened
   const s = data.status;
   if (s === 'ready') {
-    return req.report === 'financial'
-      ? renderFinancial(data.report, data.generated_at)
-      : renderResearch(data.report, data.generated_at);
+    const render = {financial: renderFinancial, earnings: renderEarnings}[req.report] || renderResearch;
+    return render(data.report, data.generated_at);
   }
   if (s === 'capped')      return researchMessage("Today's limit for new research reports has been reached. Reports already generated this week still open instantly — try again tomorrow for this one.");
   if (s === 'unavailable') return researchMessage('Equity Research is not available right now.');
@@ -2090,7 +2093,9 @@ function handleResearch(req, token, data, polls) {
   // pending
   if (polls >= RESEARCH_MAX_POLL) return researchMessage('This is taking longer than usual. Close this and reopen it in a few minutes — the report keeps generating in the background.');
   const secs = Math.round(polls * RESEARCH_POLL_MS / 1000);
-  const what = req.report === 'financial' ? 'annual and interim filings, cash-flow statements and peers' : 'recent filings, earnings calls and news';
+  const what = {financial: 'annual and interim filings, cash-flow statements and peers',
+                earnings: 'the earnings release, quarterly filing and call transcript'}[req.report]
+               || 'recent filings, earnings calls and news';
   researchMessage(`<div class="research-spinner"></div>Researching ${esc(req.symbol)} — reading ${what}…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
   setTimeout(async () => {
     if (token !== _researchToken) return;
@@ -2155,6 +2160,72 @@ function renderResearch(r, generatedAt) {
     html += `<h4>Sources</h4><ul>${sources.map(s =>
       `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" style="color:#58a6ff">${esc(s.title || s.url)}</a></li>`).join('')}</ul>`;
   }
+  document.getElementById('researchBody').innerHTML = html;
+}
+
+// Builds the [n] citation-link function for a report's sources list.
+function makeCite(sources) {
+  const byId = {};
+  (sources || []).forEach(s => { if (s && s.id != null) byId[s.id] = s; });
+  return id => {
+    const s = byId[id];
+    if (!s) return '';
+    const tag = `<sup style="font-size:.62rem">[${esc(id)}]</sup>`;
+    return /^https?:\/\//i.test(s.url || '')
+      ? `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" title="${esc(s.title || s.url)}" style="color:#58a6ff;text-decoration:none">${tag}</a>`
+      : tag;
+  };
+}
+
+function researchSources(sources) {
+  const ok = (sources || []).filter(s => /^https?:\/\//i.test(s.url || ''));
+  if (!ok.length) return '';
+  return `<h4>Sources</h4><ol style="list-style:none;margin-left:0">${ok.map(s =>
+    `<li>[${esc(s.id)}] <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" style="color:#58a6ff">${esc(s.title || s.url)}</a></li>`).join('')}</ol>`;
+}
+
+function renderEarnings(r, generatedAt) {
+  const cite = makeCite(r.sources);
+  const when = generatedAt ? new Date(generatedAt).toLocaleDateString() : '';
+  const mono = v => `<span style="font-family:monospace">${esc(v == null || v === '' ? '—' : v)}</span>`;
+  let html = `<div class="research-muted" style="margin-bottom:10px">${esc(r.company)} · ${esc(r.period)}${
+    r.release_date ? ' · released ' + esc(r.release_date) : ''}${when ? ' · generated ' + esc(when) : ''}</div>`;
+
+  if (r.summary) html += `<h4>Summary</h4><div>${esc(r.summary)}</div>`;
+
+  html += '<h4>Results vs Prior Year, Guidance &amp; Consensus</h4>' + researchTable(
+    ['Metric', 'GAAP', 'Adjusted', 'Prior year', 'YoY', 'Prior guidance', 'Consensus'],
+    (r.results || []).map(x => [`<strong>${esc(x.metric)}</strong>${cite(x.source)}`,
+      mono(x.gaap), mono(x.adjusted), mono(x.prior_year), mono(x.yoy), esc(x.guidance), esc(x.consensus)]));
+  html += '<div class="research-muted" style="margin-top:4px">Consensus is shown only when a named data provider was found; otherwise "not verified".</div>';
+
+  const ga = r.gaap_vs_adjusted || {};
+  if (ga.explanation || (ga.adjustments || []).length) {
+    html += `<h4>GAAP vs Adjusted</h4><div>${esc(ga.explanation)}</div>`;
+    if ((ga.adjustments || []).length) html += researchTable(['Adjustment', 'Amount', 'Comment'],
+      ga.adjustments.map(a => [`<strong>${esc(a.item)}</strong>`, mono(a.amount), esc(a.comment)]));
+  }
+
+  const d = r.drivers || {};
+  [['Revenue Drivers', d.revenue], ['Margin Drivers', d.margins], ['Cash-Flow Drivers', d.cash_flow],
+   ['What Drives the Guidance', d.guidance]].forEach(([h, t]) => {
+    if (t) html += `<h4>${h}</h4><div>${esc(t)}</div>`;
+  });
+
+  if ((r.guidance || []).length) html += '<h4>Guidance</h4>' + researchTable(['Item', 'New', 'Prior', 'Consensus', 'Comment'],
+    r.guidance.map(g => [`<strong>${esc(g.item)}</strong>`, mono(g.new), mono(g.prior), esc(g.consensus), esc(g.comment)]));
+
+  const kind = (label, c) => `<span class="research-kind" style="color:${c};border-color:${c};background:${c}22">${label}</span>`;
+  const rows = [
+    ...(r.positive_surprises || []).map(x => [kind('POSITIVE SURPRISE', '#3fb950'), x]),
+    ...(r.hidden_weaknesses || []).map(x => [kind('HIDDEN WEAKNESS', '#f85149'), x]),
+  ].map(([k, x]) => [`${k}<div style="margin-top:4px"><strong>${esc(x.point)}</strong></div>`, esc(x.evidence)]);
+  html += '<h4>Positive Surprises &amp; Hidden Weaknesses</h4>' + researchTable(['Finding', 'Evidence'], rows);
+
+  html += `<h4>3 Critical Questions Before Drawing Conclusions</h4><ol>${
+    (r.questions || []).map(q => `<li>${esc(q)}</li>`).join('')}</ol>`;
+
+  html += researchSources(r.sources);
   document.getElementById('researchBody').innerHTML = html;
 }
 

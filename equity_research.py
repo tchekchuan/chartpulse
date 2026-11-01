@@ -23,6 +23,12 @@
 #       dilution / working-capital analysis, a peer benchmark, and
 #       deterioration flags.
 #
+#       Third report type, "earnings": the latest quarter's release,
+#       statements and call -- GAAP vs adjusted, vs prior year / prior
+#       guidance / named-source consensus, real drivers, positive
+#       surprises, hidden weaknesses, 3 critical questions. Cached for
+#       EARNINGS_CACHE_DAYS (default 2) so a new release isn't missed.
+#
 #       A report takes 1-3 minutes (several web searches), far past
 #       gunicorn's 30s worker timeout on a single sync worker, so it
 #       runs in a background thread and the page polls for it.
@@ -55,15 +61,20 @@ DAILY_CAP = int(os.environ.get("EQUITY_RESEARCH_DAILY_CAP", "5"))
 CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_CACHE_DAYS", "7"))
 
 HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
-# Two report types share one pipeline and one cache table. The table's
+# All report types share one pipeline and one cache table. The table's
 # `horizon` column is the cache key: "1y"/"3y"/"5y" for a business report,
-# FIN_KEY for a financial-strength report (which has no horizon).
-REPORT_TYPES = ("business", "financial")
+# FIN_KEY / EARN_KEY for the financial-strength and earnings reports
+# (neither has a horizon).
+REPORT_TYPES = ("business", "financial", "earnings")
 FIN_KEY = "fin"
+EARN_KEY = "earn"
+# An earnings review is about the latest quarter, so a week-old copy could
+# miss a release that landed in between -- keep it much fresher.
+EARNINGS_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_EARNINGS_CACHE_DAYS", "2"))
 
 
 def cache_key(report, horizon):
-    return FIN_KEY if report == "financial" else horizon
+    return {"financial": FIN_KEY, "earnings": EARN_KEY}.get(report, horizon)
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
@@ -160,9 +171,53 @@ def _financial_prompt(who):
     )
 
 
+EARNINGS_SHAPE = """{
+  "company": "full company name",
+  "period": "fiscal quarter analyzed and its end date, e.g. 'Q1 FY2027 (ended Sep 28, 2026)'",
+  "release_date": "date the results were released",
+  "summary": "3-4 sentence plain-language overview of the quarter, no rating",
+  "results": [{"metric": "", "gaap": "", "adjusted": "", "prior_year": "", "yoy": "",
+               "guidance": "company's prior guidance for this quarter, or 'none given'",
+               "consensus": "analyst consensus with its named provider, or 'not verified'",
+               "source": 1}],
+  "gaap_vs_adjusted": {"explanation": "", "adjustments": [{"item": "", "amount": "", "comment": ""}]},
+  "drivers": {"revenue": "", "margins": "", "cash_flow": "", "guidance": ""},
+  "guidance": [{"item": "", "new": "", "prior": "", "consensus": "", "comment": ""}],
+  "positive_surprises": [{"point": "", "evidence": ""}],
+  "hidden_weaknesses": [{"point": "", "evidence": ""}],
+  "questions": ["", "", ""],
+  "sources": [{"id": 1, "title": "", "url": ""}]
+}"""
+
+
+def _earnings_prompt(who):
+    return (
+        f"Analyze {who}'s most recently reported fiscal quarter: its earnings release, "
+        "financial statements (10-Q/6-K/interim report) and earnings-call transcript. "
+        "Compare reported results with the prior-year period, the company's previous "
+        "guidance, and analyst expectations. Separate GAAP results from adjusted (non-GAAP) "
+        "figures and explain each material adjustment. Identify the real drivers behind "
+        "revenue, margins, cash flow, and management guidance -- price vs volume vs mix, "
+        "one-offs, timing, accounting changes. Highlight positive surprises, hidden "
+        "weaknesses (things the headline numbers or adjusted figures obscure), and exactly "
+        "three critical questions investors should ask before drawing conclusions.\n\n"
+        "Rows for results: Revenue, Gross margin, Operating income/margin, Net income, "
+        "Diluted EPS, Operating cash flow, Free cash flow, plus up to 3 company-specific KPIs "
+        "management highlights.\n\n"
+        "Rules: analyst consensus counts only if you found it in a named source (e.g. LSEG or "
+        "FactSet figures quoted by Reuters/Bloomberg/the company) -- name the provider in the "
+        "value; otherwise write 'not verified'. Never invent consensus or guidance. If no call "
+        "transcript is available, say so in summary and rely on the release and the prepared "
+        "remarks. Every results row and every source cites a sources id.\n\n"
+        "Your final message must be ONLY a JSON object (no markdown fences, no other "
+        f"text) in exactly this shape:\n{EARNINGS_SHAPE}"
+    )
+
+
 REQUIRED = {
     "business": ("summary", "opportunities", "risks", "questions"),
     "financial": ("periods", "metrics", "analysis", "sources"),
+    "earnings": ("period", "results", "drivers", "questions"),
 }
 
 
@@ -192,7 +247,8 @@ def init_db():
 def _get_cached(symbol, horizon):
     if not DATABASE_URL:
         return None
-    cutoff = datetime.now(timezone.utc) - timedelta(days=CACHE_DAYS)
+    days = EARNINGS_CACHE_DAYS if horizon == EARN_KEY else CACHE_DAYS
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -255,6 +311,8 @@ def _validate(report, kind):
     if kind == "business":
         report["opportunities"] = report["opportunities"][:3]
         report["risks"] = report["risks"][:3]
+    elif kind == "earnings":
+        report["questions"] = report["questions"][:3]
     else:
         # The model sometimes echoes the "... one row each" hint from the
         # shape as a literal string -- keep only real metric rows.
@@ -270,6 +328,10 @@ def _generate(symbol, kind, horizon, company_name):
     if kind == "financial":
         prompt = today + _financial_prompt(who)
         # Three annual reports + interim + peers needs more lookups.
+        max_uses = 12
+    elif kind == "earnings":
+        prompt = today + _earnings_prompt(who)
+        # Release + 10-Q + transcript + prior guidance + consensus.
         max_uses = 12
     else:
         prompt = today + _business_prompt(who, HORIZONS[horizon])
