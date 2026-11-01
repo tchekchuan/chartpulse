@@ -1671,6 +1671,13 @@ def get_stock():
             except Exception:
                 price, prev_close, currency = last_close, last_prev_close, "USD"
             priced_at = last_bar_ts
+            # A daily bar's timestamp is the START of its trading day
+            # (exchange midnight), not when the price was set -- shown as a
+            # clock time it read "12:00 AM" for a 4pm close. Send the
+            # exchange-local session date so the page shows a date only.
+            session_date = str(pd.Timestamp(df[_dt_col(df)].iloc[-1]).date())
+        else:
+            session_date = None
 
         meta = {
             "symbol":     symbol,
@@ -1681,6 +1688,8 @@ def get_stock():
             # Unix seconds of the actual quote/bar used above -- ground
             # truth for "as of" in the UI, whichever source won out.
             "priced_at":  priced_at,
+            # Set only when the price comes from daily data (no live quote).
+            "session_date": session_date,
         }
 
         try:

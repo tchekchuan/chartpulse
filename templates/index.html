@@ -1438,7 +1438,13 @@ function updatePriceBar(meta, stage) {
   document.getElementById('pATR').textContent   = `ATR: ${meta.atr.toFixed(2)}`;
 
   const asOf = document.getElementById('pAsOf');
-  if (meta.priced_at) {
+  if (meta.session_date) {
+    // Daily data, no live quote: a date only (a bar's timestamp is the start of
+    // its trading day, so a clock time would be misleading).
+    const [y, mo, da] = meta.session_date.split('-').map(Number);
+    const label = new Date(y, mo - 1, da).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+    asOf.textContent = `As of the ${label} session (daily data) — delayed, not real-time`;
+  } else if (meta.priced_at) {
     const d = new Date(meta.priced_at * 1000);
     asOf.textContent = `As of ${d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})} — delayed, not real-time`;
   } else {
