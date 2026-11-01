@@ -2375,12 +2375,14 @@ function calcPosition(inp) {
   const C = isNaN(num('feeFixed')) ? 0 : num('feeFixed');
   const F = isNaN(num('feePct')) ? 0 : num('feePct') / 100;
   const errors = [];
-  if (!(A > 0)) errors.push('Account size must be greater than 0.');
-  if (!(R > 0 && R <= 100)) errors.push('Maximum account risk must be above 0% and at most 100%.');
-  if (!(Y > 0 && Y <= 100)) errors.push('Maximum allocation must be above 0% and at most 100% (no leverage).');
-  if (!(E > 0)) errors.push('Entry price must be greater than 0.');
-  if (!(S >= 0)) errors.push('Stop-loss must be a price of 0 or more.');
-  if (!(T > 0)) errors.push('Target price must be greater than 0.');
+  // A blank box gets "Enter ...", a bad value gets the rule it breaks.
+  const need = (v, label, ok, rule) => { if (isNaN(v)) errors.push(`Enter ${label}.`); else if (!ok) errors.push(rule); };
+  need(A, 'the account size', A > 0, 'Account size must be greater than 0.');
+  need(R, 'the maximum account risk %', R > 0 && R <= 100, 'Maximum account risk must be above 0% and at most 100%.');
+  need(Y, 'the maximum allocation %', Y > 0 && Y <= 100, 'Maximum allocation must be above 0% and at most 100% (no leverage).');
+  need(E, 'an entry price', E > 0, 'Entry price must be greater than 0.');
+  need(S, 'a stop-loss price', S >= 0, 'Stop-loss must be a price of 0 or more.');
+  need(T, 'a target price', T > 0, 'Target price must be greater than 0.');
   if (E > 0 && S >= 0 && S >= E) errors.push('For a long trade the stop-loss must be below the entry price.');
   if (E > 0 && T > 0 && T <= E) errors.push('For a long trade the target must be above the entry price.');
   if (C < 0 || F < 0) errors.push('Transaction costs cannot be negative.');
