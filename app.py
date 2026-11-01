@@ -2214,7 +2214,7 @@ def research_status():
     """Polled by the Equity Research modal. Read-only: never starts a job.
     Login-gated like the AI Analyst -- each report is a real per-call cost."""
     if not session.get("email"):
-        return jsonify({"error": "Log in to use Equity Research"}), 401
+        return jsonify({"error": "Log in to use Research reports"}), 401
     symbol, report, horizon, err = _research_args(request.args)
     if err:
         return err
@@ -2257,7 +2257,7 @@ def _swing_facts(symbol, body, days):
 @limiter.limit("10 per hour")
 def research_start():
     if not session.get("email"):
-        return jsonify({"error": "Log in to use Equity Research"}), 401
+        return jsonify({"error": "Log in to use Research reports"}), 401
     body = request.get_json(silent=True) or {}
     symbol, report, horizon, err = _research_args(body)
     if err:
