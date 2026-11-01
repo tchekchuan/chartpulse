@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 import logging
 import os
+import hashlib
 import re
 import threading
 import time
@@ -14,6 +15,8 @@ import pandas as pd
 import numpy as np
 
 app = Flask(__name__)
+# Caps request bodies (a swing-trade CSV upload is the largest at <=1 MB).
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 app.logger.setLevel(logging.INFO)
 # Falls back to a random per-process key if FLASK_SECRET_KEY isn't set,
 # which just means existing sessions get invalidated on every restart --
@@ -2114,6 +2117,22 @@ def _research_args(src):
         if not re.fullmatch(r"[0-9a-f]{16}", key):
             return None, None, None, (jsonify({"error": "Missing thesis"}), 400)
         return symbol, report, key, None
+    if report == "swing":
+        # Trade length in trading days. The dataset key (hash of the
+        # upload, or of symbol + last bar date for the site's own data) is
+        # only known after research_start builds the dataset, so the POST
+        # gets a placeholder and polling GETs must send data_key.
+        try:
+            days = int(src.get("days"))
+        except (TypeError, ValueError):
+            days = 0
+        if not equity_research.SWING_MIN_DAYS <= days <= equity_research.SWING_MAX_DAYS:
+            return None, None, None, (jsonify({"error":
+                f"Trade length must be {equity_research.SWING_MIN_DAYS}-{equity_research.SWING_MAX_DAYS} trading days"}), 400)
+        key = (src.get("data_key") or "").strip().lower()
+        if key and not re.fullmatch(r"[0-9a-f]{12}", key):
+            return None, None, None, (jsonify({"error": "Invalid data key"}), 400)
+        return symbol, report, f"{days}-{key or 'pending'}", None
     if report == "news":
         # Start/end dates travel on every call (short, so fine in a URL);
         # the canonical "YYYYMMDD-YYYYMMDD" rides in the horizon slot.
@@ -2135,7 +2154,39 @@ def research_status():
     symbol, report, horizon, err = _research_args(request.args)
     if err:
         return err
+    if report == "swing" and horizon.endswith("-pending"):
+        return jsonify({"error": "Missing data key"}), 400
     return jsonify(equity_research.get_status(symbol, report, horizon))
+
+
+def _swing_facts(symbol, body, days):
+    """Builds the swing-trade fact sheet from an uploaded CSV, or from the
+    site's own Yahoo daily history. Returns (facts, data_key, None) or
+    (None, None, error message)."""
+    csv_text = body.get("csv")
+    try:
+        if csv_text:
+            df, notes = swing_data.parse_csv(csv_text)
+            fname = re.sub(r"[^\w.\- ]", "", str(body.get("filename") or "upload.csv"))[:80]
+            key = hashlib.sha256(csv_text.encode("utf-8")).hexdigest()[:12]
+            facts = swing_data.analyze(df, notes, source=f"uploaded file '{fname}'", days=days)
+        else:
+            t = yf.Ticker(symbol)
+            hist = t.history(period="2y", interval="1d", auto_adjust=True)
+            if hist is None or hist.empty:
+                return None, None, f"No daily price history available for {symbol}."
+            hist = hist.reset_index()
+            try:
+                splits = list(t.splits.items())
+            except Exception:
+                splits = []
+            facts = swing_data.analyze(hist[["Date", "Open", "High", "Low", "Close", "Volume"]],
+                                       source="Yahoo Finance daily bars (split- and dividend-adjusted)",
+                                       known_splits=splits, days=days)
+            key = hashlib.sha256(f"site:{symbol}:{facts['indicators']['last_date']}".encode()).hexdigest()[:12]
+    except swing_data.DataError as e:
+        return None, None, str(e)
+    return facts, key, None
 
 
 @app.route("/api/research/start", methods=["POST"])
@@ -2148,6 +2199,13 @@ def research_start():
     if err:
         return err
     thesis = equity_research.normalise_thesis(body.get("thesis")) if report == "thesis" else None
+    facts = data_key = None
+    if report == "swing":
+        days = int(horizon.split("-")[0])
+        facts, data_key, msg = _swing_facts(symbol, body, days)
+        if msg:
+            return jsonify({"error": msg}), 400
+        horizon = f"{days}-{data_key}"
     # Usually a cache hit -- the user has just loaded this symbol's page.
     # The name keeps the model from confusing tickers shared across exchanges.
     # A valuation is compared with a price the site itself verified, not
@@ -2162,9 +2220,11 @@ def research_start():
             name = get_fundamentals(yf.Ticker(symbol)).get("name")
         except Exception:
             name = None
-    result = equity_research.start(symbol, report, horizon, name, quote, thesis)
+    result = equity_research.start(symbol, report, horizon, name, quote, thesis, facts)
     if report == "thesis":
         result["thesis_key"] = horizon   # the page polls with this, not the text
+    if report == "swing":
+        result["data_key"] = data_key    # ditto -- the CSV never goes back in a URL
     return jsonify(result)
 
 
@@ -2320,6 +2380,7 @@ import user_watchlist  # noqa: E402
 import symbol_state    # noqa: E402
 import ai_analyst      # noqa: E402
 import equity_research # noqa: E402
+import swing_data      # noqa: E402
 subscribers.init_db()
 ark_tracker.init_db()
 track_record.init_db()

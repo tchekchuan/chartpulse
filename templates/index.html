@@ -673,6 +673,7 @@
           <option value="value">Intrinsic value</option>
           <option value="thesis">Challenge my thesis</option>
           <option value="news">News &amp; catalysts</option>
+          <option value="swing">Swing trade setup</option>
         </select>
         <input id="researchPeers" placeholder="Peers, e.g. AMD, INTC" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem;width:150px">
         <select id="researchHorizon">
@@ -683,6 +684,10 @@
         <textarea id="researchThesis" rows="4" maxlength="2000" placeholder="Your thesis, e.g. 'AI data-centre demand doubles SiC revenue by 2028 and margins turn positive'" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.8rem;font-family:inherit;width:100%;box-sizing:border-box;resize:vertical"></textarea>
         <span id="researchDates" style="display:none;gap:4px;align-items:center;flex-wrap:wrap">
           <input type="date" id="researchStart" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark"> <span class="research-muted">to</span> <input type="date" id="researchEnd" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark">
+        </span>
+        <span id="researchSwing" style="display:none;gap:4px;align-items:center;flex-wrap:wrap">
+          <input type="number" id="researchSwingDays" min="2" max="60" value="10" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;width:56px"><span class="research-muted">trading days</span>
+          <input type="file" id="researchSwingFile" accept=".csv,text/csv" style="font-size:.72rem;color:#8b949e;max-width:190px">
         </span>
         <button id="researchOpenBtn">Open report</button>
       </div>
@@ -2037,6 +2042,23 @@ function openResearch(report, horizon, peersText) {
     document.getElementById('researchTitle').textContent = `🔬 Peer Comparison — ${list.join(' vs ')}`;
     return startResearch({symbol: list.join(','), report, horizon: '3y'}, ++_researchToken);
   }
+  if (report === 'swing') {
+    const o = peersText || {};
+    const days = parseInt(o.days, 10);
+    document.getElementById('researchTitle').textContent = `🔬 ${sym} — Swing Trade Setup`;
+    if (!(days >= 2 && days <= 60)) { _researchToken++; return researchMessage('Enter a trade length of 2–60 trading days.'); }
+    const token = ++_researchToken;
+    const go = (csv, filename) => {
+      document.getElementById('researchTitle').textContent = `🔬 ${sym} — ${days}-Day Swing Trade Setup${filename ? ' · ' + filename : ''}`;
+      startResearch({symbol: sym, report, horizon: '3y', days, ...(csv ? {csv, filename} : {})}, token);
+    };
+    if (!o.file) return go(null, null);
+    if (o.file.size > 1000000) return researchMessage('That file is larger than 1 MB — upload daily bars only.');
+    researchMessage('<div class="research-spinner"></div>Reading your file…');
+    o.file.text().then(t => { if (token === _researchToken) go(t, o.file.name); })
+      .catch(() => { if (token === _researchToken) researchMessage("Couldn't read that file."); });
+    return;
+  }
   if (report === 'news') {
     const r = peersText || {};
     document.getElementById('researchTitle').textContent = `🔬 ${sym} — News & Catalysts`;
@@ -2068,11 +2090,13 @@ document.getElementById('researchType').addEventListener('change', e => {
   document.getElementById('researchPeers').style.display = e.target.value === 'compare' ? '' : 'none';
   document.getElementById('researchThesis').style.display = e.target.value === 'thesis' ? '' : 'none';
   document.getElementById('researchDates').style.display = e.target.value === 'news' ? 'inline-flex' : 'none';
+  document.getElementById('researchSwing').style.display = e.target.value === 'swing' ? 'inline-flex' : 'none';
 });
 document.getElementById('researchOpenBtn').addEventListener('click', () =>
   openResearch(document.getElementById('researchType').value, document.getElementById('researchHorizon').value,
                {thesis: document.getElementById('researchThesis').value,
                 news: {start: document.getElementById('researchStart').value, end: document.getElementById('researchEnd').value},
+                swing: {days: document.getElementById('researchSwingDays').value, file: document.getElementById('researchSwingFile').files[0]},
                }[document.getElementById('researchType').value] ?? document.getElementById('researchPeers').value));
 
 // Top-bar entry point: always opens the Research window, so it is never a
@@ -2110,6 +2134,12 @@ document.getElementById('researchBtn').addEventListener('click', () => {
         <input type="date" id="researchPickStart" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark"><span class="research-muted">to</span><input type="date" id="researchPickEnd" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;color-scheme:dark">
         <button id="researchPickNews" style="${btn};flex:1">News &amp; catalysts</button>
       </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="number" id="researchPickDays" min="2" max="60" value="10" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 6px;font-size:.8rem;width:56px"><span class="research-muted">days</span>
+        <button id="researchPickSwing" style="${btn};flex:1">Swing trade setup</button>
+      </div>
+      <div class="research-muted" style="margin-top:-4px">Uses the site's daily bars, or upload your own CSV (Date, Open, High, Low, Close, Volume):
+        <input type="file" id="researchPickFile" accept=".csv,text/csv" style="font-size:.72rem;color:#8b949e;max-width:100%"></div>
       <textarea id="researchPickThesis" rows="3" maxlength="2000" placeholder="Your thesis for ${esc(sym)} — what you believe and why" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 8px;font-size:.8rem;font-family:inherit;width:100%;box-sizing:border-box;resize:vertical"></textarea>
       <button id="researchPickThesisBtn" style="${btn}">Challenge my thesis — 5 strongest objections</button>
       <div class="research-muted" style="text-align:center">First run takes 1–3 minutes; after that it opens instantly for a week.</div>
@@ -2117,6 +2147,8 @@ document.getElementById('researchBtn').addEventListener('click', () => {
   const nr = defaultNewsRange();
   Object.assign(document.getElementById('researchPickStart'), {value: nr.start, max: nr.end});
   Object.assign(document.getElementById('researchPickEnd'), {value: nr.end, max: nr.end});
+  document.getElementById('researchPickSwing').addEventListener('click', () =>
+    openResearch('swing', '3y', {days: document.getElementById('researchPickDays').value, file: document.getElementById('researchPickFile').files[0]}));
   document.getElementById('researchPickNews').addEventListener('click', () =>
     openResearch('news', '3y', {start: document.getElementById('researchPickStart').value, end: document.getElementById('researchPickEnd').value}));
   document.getElementById('researchPickThesisBtn').addEventListener('click', () =>
@@ -2158,6 +2190,7 @@ async function startResearch(req, token) {
     return;
   }
   if (data.thesis_key) req.thesis_key = data.thesis_key;
+  if (data.data_key) req.data_key = data.data_key;
   handleResearch(req, token, data, 0);
 }
 
@@ -2165,7 +2198,7 @@ function handleResearch(req, token, data, polls) {
   if (token !== _researchToken) return;   // modal closed or reopened
   const s = data.status;
   if (s === 'ready') {
-    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare, value: renderValue, thesis: renderThesis, news: renderNewsReport}[req.report] || renderResearch;
+    const render = {financial: renderFinancial, earnings: renderEarnings, compare: renderCompare, value: renderValue, thesis: renderThesis, news: renderNewsReport, swing: renderSwing}[req.report] || renderResearch;
     return render(data.report, data.generated_at);
   }
   if (s === 'capped')      return researchMessage("Today's limit for new research reports has been reached. Reports already generated this week still open instantly — try again tomorrow for this one.");
@@ -2185,13 +2218,14 @@ function handleResearch(req, token, data, polls) {
                 compare: "each company's filings and current valuation data",
                 value: 'filings, share count and discount-rate inputs, then building the scenarios',
                 thesis: 'filings, competitor disclosures and industry data for the strongest objections',
-                news: 'press releases, filings and financial news for the period'}[req.report]
+                news: 'press releases, filings and financial news for the period',
+                swing: 'the earnings and events calendar; indicators are already computed'}[req.report]
                || 'recent filings, earnings calls and news';
   researchMessage(`<div class="research-spinner"></div>Researching ${esc(req.symbol)} — reading ${what}…<br><span class="research-muted">${secs}s elapsed · usually 1–3 minutes</span>`);
   setTimeout(async () => {
     if (token !== _researchToken) return;
     try {
-      const {thesis, ...params} = req;   // thesis text stays out of the URL; thesis_key is enough
+      const {thesis, csv, filename, ...params} = req;   // bulky inputs stay out of the URL; the returned keys are enough
       const q    = new URLSearchParams(params).toString();
       const res  = await fetch(`/api/research?${q}`);
       const next = await res.json();
@@ -2317,6 +2351,100 @@ function renderEarnings(r, generatedAt) {
   html += `<h4>3 Critical Questions Before Drawing Conclusions</h4><ol>${
     (r.questions || []).map(q => `<li>${esc(q)}</li>`).join('')}</ol>`;
 
+  html += researchSources(r.sources);
+  document.getElementById('researchBody').innerHTML = html;
+}
+
+function renderSwing(r, generatedAt) {
+  const cite = makeCite(r.sources);
+  const when = generatedAt ? new Date(generatedAt).toLocaleString() : '';
+  const f = r.data || {}, v = f.validation || {}, ind = f.indicators || {}, lv = f.levels || {}, sp = f.splits || {};
+  const n = (x, d = 2) => (x == null || isNaN(x)) ? '—' : Number(x).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+  const mono = x => `<span style="font-family:monospace">${x}</span>`;
+  const okFlag = (bad, txt) => bad ? `<span style="color:#e3b341">⚠ ${esc(txt)}</span>` : '<span style="color:#3fb950">✓</span>';
+
+  let html = `<div class="research-muted" style="margin-bottom:10px">${esc(r.company)} · ${esc(f.source)} · ${esc(f.trade_days)}-trading-day window to ${esc(f.window_end)}${when ? ' · generated ' + esc(when) : ''}</div>`;
+
+  // ── Part A: historical, computed ─────────────────────────────────────
+  html += `<div style="border-left:4px solid #58a6ff;padding-left:10px;margin:6px 0 4px"><strong style="color:#58a6ff;letter-spacing:.05em">PART A — HISTORICAL OBSERVATIONS</strong>
+    <div class="research-muted">Computed by the site from the data. Facts about the past, not predictions.</div></div>`;
+
+  html += '<h4>Dataset Validation</h4>' + researchTable(['Check', 'Result'], [
+    ['Rows used', mono(`${esc(v.rows_used)} of ${esc(v.rows_received)} · ${esc(v.first_date)} to ${esc(v.last_date)}`)],
+    ['Date order', okFlag(!v.was_sorted, 'was unsorted (fixed)')],
+    ['Duplicate dates', okFlag(v.duplicate_dates, `${v.duplicate_dates} removed`)],
+    ['Missing / bad prices', okFlag(v.rows_missing_prices || v.non_positive_prices, `${(v.rows_missing_prices || 0) + (v.non_positive_prices || 0)} rows dropped`)],
+    ['High/Low consistency', okFlag(v.inconsistent_ohlc_rows, `${v.inconsistent_ohlc_rows} odd bars`)],
+    ['Zero volume', okFlag(v.zero_volume_rows, `${v.zero_volume_rows} bars`)],
+    ['Stale repeated bars', okFlag(v.stale_repeated_bars, `${v.stale_repeated_bars} bars`)],
+    ['Missing weekdays', `${esc(v.missing_weekdays_total)} total · ${esc(v.single_day_gaps)} single-day (usually holidays) · ${okFlag(v.multi_day_gap_count, `${v.multi_day_gap_count} multi-day gap(s)`)}`],
+    ['Stock splits', (sp.possible_unadjusted || []).length
+      ? `<span style="color:#f85149">⚠ possible unadjusted split: ${sp.possible_unadjusted.map(x => `${esc(x.date)} (${esc(x.looks_like)}, ratio ${esc(x.ratio)})`).join('; ')}</span>`
+      : `<span style="color:#3fb950">✓</span> no unadjusted split pattern${(sp.known_splits || []).length ? ` · known splits (already adjusted): ${sp.known_splits.map(x => esc(x.date) + ' ×' + esc(x.ratio)).join(', ')}` : ''}`],
+  ]);
+  if ((v.multi_day_gaps || []).length) html += `<div class="research-muted">Gaps: ${v.multi_day_gaps.map(g => `${esc(g.after)} → ${esc(g.before)} (${esc(g.missing_weekdays)} weekdays)`).join(' · ')}</div>`;
+  if ((v.notes || []).length) html += `<ul class="research-muted">${v.notes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+
+  const s20 = ind.sma20 || {}, s50 = ind.sma50 || {}, rv = ind.relative_volume || {}, m = ind.macd || {}, a = ind.atr14 || {}, roc = ind.roc20_pct || {}, rg = ind.range_52w || {};
+  html += `<h4>Indicators — last bar ${esc(ind.last_date)}, close ${mono(n(ind.last_close))}</h4>` + researchTable(['Indicator', 'Value', 'Calculation'], [
+    ['SMA 20', mono(`${n(s20.value)} <span class="research-muted">(5d ago ${n(s20.five_days_ago)}) · price ${s20.price_vs_pct > 0 ? '+' : ''}${n(s20.price_vs_pct)}%</span>`), mono(esc(s20.calc))],
+    ['SMA 50', mono(`${n(s50.value)} <span class="research-muted">(5d ago ${n(s50.five_days_ago)}) · price ${s50.price_vs_pct > 0 ? '+' : ''}${n(s50.price_vs_pct)}%</span>`), mono(esc(s50.calc))],
+    ['SMA 20 vs 50', esc(ind.sma20_vs_sma50), ''],
+    ['Relative volume', mono(`${n(rv.value)}× <span class="research-muted">(5-day avg ${n(rv.five_day_avg)}×)</span>`), mono(esc(rv.calc))],
+    ['RSI 14', mono(n(((ind.rsi14 || {}).value), 1)), esc((ind.rsi14 || {}).calc)],
+    ['MACD 12/26/9', mono(`line ${n(m.line, 3)} · signal ${n(m.signal, 3)} · hist ${n(m.histogram, 3)} <span class="research-muted">(5d ago ${n(m.histogram_5d_ago, 3)})</span>`), esc(m.calc)],
+    ['ATR 14', mono(`${n(a.value)} (${n(a.pct_of_price)}% of price)`), esc(a.calc)],
+    ['20-day change', mono(`${roc.value > 0 ? '+' : ''}${n(roc.value)}%`), mono(esc(roc.calc))],
+    [`${esc(rg.sessions)}-session range`, mono(`${n(rg.low)} (${esc(rg.low_date)}) – ${n(rg.high)} (${esc(rg.high_date)})`), rg.sessions < 252 ? '<span style="color:#e3b341">less than a year of data</span>' : ''],
+  ]);
+
+  const zoneRows = (zs, kind) => (zs || []).map(z => [kind, mono(`${n(z.low)} – ${n(z.high)}`), mono(`${z.distance_pct > 0 ? '+' : ''}${n(z.distance_pct)}%`),
+    esc(z.touches), `<span class="research-muted">${(z.touch_dates || []).map(esc).join(', ')}</span>`]);
+  html += '<h4>Support &amp; Resistance Zones</h4>' + researchTable(['Type', 'Zone', 'From last close', 'Touches', 'Touch dates (latest 6)'],
+    [...zoneRows([...(lv.resistance || [])].reverse(), '<span style="color:#f85149">Resistance</span>'),
+     ...zoneRows(lv.current_zone, '<span style="color:#e3b341">Price inside</span>'),
+     ...zoneRows(lv.support, '<span style="color:#3fb950">Support</span>')]);
+  html += `<div class="research-muted">${esc(lv.method)}</div>`;
+
+  const t = r.trend || {};
+  html += `<h4>Reading of the Data${t.label ? ' — ' + esc(t.label) : ''}</h4><div>${esc(r.historical_read)}</div>`;
+  if (t.evidence) html += `<div class="research-muted" style="margin-top:4px">${esc(t.evidence)}</div>`;
+  if (r.data_caveats) html += `<div style="margin-top:6px"><strong>Data caveats:</strong> ${esc(r.data_caveats)}</div>`;
+
+  // ── Part B: hypothetical ─────────────────────────────────────────────
+  html += `<div style="border-left:4px solid #e3b341;padding-left:10px;margin:18px 0 4px"><strong style="color:#e3b341;letter-spacing:.05em">PART B — HYPOTHETICAL TRADE SETUPS</strong>
+    <div class="research-muted">Conditional "if this happens" scenarios, not predictions or recommendations. Reward:risk figures are worked out by the site from the levels shown.</div></div>`;
+
+  const evs = r.events || [];
+  html += '<h4>Earnings &amp; Corporate Events</h4>' + (evs.length ? researchTable(['Date', 'Event', 'In window?', 'Why it matters'],
+    evs.map(e => [mono(esc(e.date)) + `<div class="research-muted">${esc(e.date_status)}</div>`, `<strong>${esc(e.event)}</strong>${cite(e.source)}`,
+      e.inside_window ? '<span style="color:#f85149;font-weight:700">YES</span>' : '<span class="research-muted">no</span>', esc(e.why_it_matters)]))
+    : '<div class="research-muted">No dated events found for the window.</div>');
+  if (r.event_handling) html += `<div style="margin-top:6px"><strong>Event handling:</strong> ${esc(r.event_handling)}</div>`;
+
+  (r.setups || []).forEach(st => {
+    const dir = String(st.direction || '').toLowerCase().startsWith('s') ? 'Short' : 'Long';
+    const c = st.valid === false ? '#f85149' : '#30363d';
+    html += `<div style="border:1px solid ${c};border-radius:8px;padding:10px 12px;margin-top:10px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><strong style="font-size:1rem">${esc(st.name)} (hypothetical ${dir.toLowerCase()})</strong>
+        ${st.valid === false ? '<span class="research-kind" style="color:#f85149;border-color:#f85149">FAILED SITE CHECK</span>' : ''}</div>
+      <div style="margin-top:4px"><strong>If:</strong> ${esc(st.condition)}</div>
+      <div><strong>Entry trigger:</strong> ${esc(st.entry_trigger)}</div>
+      ${researchTable(['Entry', 'Invalidation', 'Target', 'Reward : risk', 'Risk', 'Stop distance'], [[
+        mono(n(st.entry)), mono(n(st.invalidation)), mono(n(st.target)),
+        st.reward_to_risk != null ? mono(`<strong>${n(st.reward_to_risk)}</strong>`) : '—',
+        st.risk_pct != null ? mono(`${n(st.risk_per_share)} (${n(st.risk_pct)}%)`) : '—',
+        st.stop_in_atr != null ? mono(`${n(st.stop_in_atr)}× ATR`) : '—']])}
+      ${st.calc ? `<div class="research-muted" style="font-family:monospace">${esc(st.calc)}</div>` : ''}
+      <div style="margin-top:4px"><strong>Invalidated if:</strong> ${esc(st.invalidation_rule)}</div>
+      <div><strong>Target basis:</strong> ${esc(st.target_basis)}</div>
+      <div><strong>Cancel the setup if:</strong> ${esc(st.would_cancel_setup)}</div>
+      ${(st.risk_factors || []).length ? `<ul>${st.risk_factors.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    </div>`;
+  });
+
+  if ((r.checks || []).length) html += `<h4>Server Checks</h4><ul>${r.checks.map(c => `<li>${esc(c)}</li>`).join('')}</ul>`;
+  html += '<div class="research-muted" style="margin-top:10px">Hypothetical scenarios for education only. Past price behaviour does not guarantee future moves, and gaps (especially around earnings) can skip straight past an invalidation level.</div>';
   html += researchSources(r.sources);
   document.getElementById('researchBody').innerHTML = html;
 }

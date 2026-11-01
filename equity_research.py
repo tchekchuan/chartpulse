@@ -70,6 +70,17 @@
 #       the requested range and sorts by date. Cache key
 #       "nw" + "YYYYMMDD-YYYYMMDD", NEWS_CACHE_DAYS (default 1).
 #
+#       Eighth report type, "swing": an N-day swing-trade evaluation.
+#       All historical numbers (validation, splits, SMA20/50, relative
+#       volume, RSI/MACD/ATR, support/resistance zones) come from
+#       swing_data.py and are passed in as `facts`; the model only
+#       writes conditional breakout / pullback setups and finds
+#       upcoming earnings / corporate events. _check_swing() recomputes
+#       risk/reward for every setup, rejects stops or targets on the
+#       wrong side of entry, and decides on the server whether each
+#       event falls inside the trade window. Cache key
+#       "sw" + "<days>-<data hash>", SWING_CACHE_DAYS (default 1).
+#
 #       A report takes 1-3 minutes (several web searches), far past
 #       gunicorn's 30s worker timeout on a single sync worker, so it
 #       runs in a background thread and the page polls for it.
@@ -108,7 +119,7 @@ HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
 # `horizon` column is the cache key: "1y"/"3y"/"5y" for a business report,
 # FIN_KEY / EARN_KEY for the financial-strength and earnings reports
 # (neither has a horizon).
-REPORT_TYPES = ("business", "financial", "earnings", "compare", "value", "thesis", "news")
+REPORT_TYPES = ("business", "financial", "earnings", "compare", "value", "thesis", "news", "swing")
 FIN_KEY = "fin"
 EARN_KEY = "earn"
 CMP_KEY = "cmp"
@@ -132,6 +143,9 @@ NEWS_PREFIX = "nw"
 NEWS_MAX_DAYS = 366
 # News keeps arriving, so a news report is only reused for a day.
 NEWS_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_NEWS_CACHE_DAYS", "1"))
+SWING_PREFIX = "sw"
+SWING_MIN_DAYS, SWING_MAX_DAYS = 2, 60
+SWING_CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_SWING_CACHE_DAYS", "1"))
 
 
 def parse_news_range(start, end):
@@ -181,6 +195,8 @@ def cache_key(report, horizon):
         return THESIS_PREFIX + horizon   # horizon carries the thesis key
     if report == "news":
         return NEWS_PREFIX + horizon     # horizon carries "YYYYMMDD-YYYYMMDD"
+    if report == "swing":
+        return SWING_PREFIX + horizon    # horizon carries "<days>-<data hash>"
     return {"financial": FIN_KEY, "earnings": EARN_KEY, "compare": CMP_KEY}.get(report, horizon)
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
@@ -638,6 +654,100 @@ def _check_news(report, key):
     return report
 
 
+SWING_SHAPE = """{
+  "company": "full company name",
+  "historical_read": "4-6 sentences describing ONLY what the computed data shows (trend, position vs SMA20/50, momentum, volume, nearest zones) -- cite the numbers, no forecasts",
+  "trend": {"label": "Uptrend | Downtrend | Range / basing | Transition", "evidence": "which computed figures support the label"},
+  "data_caveats": "anything in the validation or split checks that limits these conclusions, or 'none material'",
+  "events": [{"date": "YYYY-MM-DD", "date_status": "Confirmed | Estimated", "event": "", "why_it_matters": "e.g. gap risk through a stop", "source": 1}],
+  "setups": [
+    {"name": "Breakout", "direction": "Long | Short",
+     "condition": "what must happen first, referencing a computed zone",
+     "entry_trigger": "the exact rule, e.g. 'daily close above 23.59 on relative volume >= 1.5'",
+     "entry": 0, "invalidation": 0, "invalidation_rule": "",
+     "target": 0, "target_basis": "which computed zone or measured move",
+     "risk_factors": [""], "would_cancel_setup": ""},
+    {"name": "Pullback", "...": "same fields"}
+  ],
+  "event_handling": "how upcoming earnings / events inside the window change these setups (e.g. no new entries before the release)",
+  "sources": [{"id": 1, "title": "", "url": ""}]
+}"""
+
+
+def _swing_prompt(who, facts):
+    days = facts["trade_days"]
+    return (
+        f"Evaluate a potential {days}-trading-day swing trade in {who}. The dataset has already been "
+        "validated and every indicator computed by the site; the results are in the JSON between the "
+        "facts tags. Use ONLY these numbers for anything historical -- do not recompute, re-download "
+        "or replace them, and do not invent levels that aren't in the facts (round numbers are fine "
+        "if you say so).\n"
+        f"<facts>\n{json.dumps(facts, separators=(',', ':'))}\n</facts>\n\n"
+        "1) historical_read / trend / data_caveats: describe what the data shows, citing the figures. "
+        "Observations only.\n"
+        f"2) Search for earnings dates and major corporate events (earnings, investor days, debt "
+        f"maturities, lock-up expiries, index changes, court or regulatory decisions) between "
+        f"{facts['indicators']['last_date']} and about {facts['window_end']} and shortly after. Mark a "
+        "date Confirmed only if the company or an official body set it.\n"
+        "3) Build two conditional, hypothetical setups: a Breakout and a Pullback (each Long or Short "
+        "as the evidence suggests). Each needs a precise entry trigger, a numeric entry, an invalidation "
+        "price beyond a computed zone or a multiple of ATR, a numeric target tied to a computed zone, "
+        "the risk factors, and what would cancel the setup. Numbers in the price's units.\n"
+        "4) event_handling: how any event in the window changes the setups.\n\n"
+        "These are hypothetical, conditional scenarios for education -- not a recommendation or a "
+        "prediction. Do not say what anyone should do, and no price targets presented as forecasts.\n\n"
+        "Your final message must be ONLY a JSON object (no markdown fences, no other "
+        f"text) in exactly this shape:\n{SWING_SHAPE}"
+    )
+
+
+def _check_swing(report, facts):
+    """Server-side checks on the model's setups: recompute reward:risk,
+    reject a stop or target on the wrong side of entry, and decide which
+    events fall inside the trade window from the dates themselves."""
+    report["data"] = facts
+    checks = []
+    atr = (facts["indicators"].get("atr14") or {}).get("value")
+    last = facts["indicators"]["last_close"]
+    for st in report["setups"]:
+        e, stop, tgt = _num(st.get("entry")), _num(st.get("invalidation")), _num(st.get("target"))
+        long_ = str(st.get("direction", "Long")).lower().startswith("l")
+        st["valid"] = True
+        if None in (e, stop, tgt) or e <= 0:
+            st["valid"] = False
+            checks.append(f"{st.get('name')}: entry, invalidation and target must all be numbers -- setup not usable.")
+            continue
+        risk, reward = (e - stop, tgt - e) if long_ else (stop - e, e - tgt)
+        if risk <= 0:
+            st["valid"] = False
+            checks.append(f"{st.get('name')}: the invalidation level is on the wrong side of the entry for a "
+                          f"{'long' if long_ else 'short'} -- setup not usable as written.")
+        if reward <= 0:
+            st["valid"] = False
+            checks.append(f"{st.get('name')}: the target is on the wrong side of the entry -- setup not usable as written.")
+        if st["valid"]:
+            st["risk_per_share"] = round(risk, 4)
+            st["reward_per_share"] = round(reward, 4)
+            st["reward_to_risk"] = round(reward / risk, 2)
+            st["risk_pct"] = round(risk / e * 100, 2)
+            st["stop_in_atr"] = round(risk / atr, 2) if atr else None
+            st["entry_vs_last_pct"] = round((e / last - 1) * 100, 2) if last else None
+            st["calc"] = (f"reward:risk = ({tgt:g} - {e:g}) / ({e:g} - {stop:g}) = {reward / risk:.2f}" if long_ else
+                          f"reward:risk = ({e:g} - {tgt:g}) / ({stop:g} - {e:g}) = {reward / risk:.2f}")
+            if reward / risk < 1:
+                checks.append(f"{st.get('name')}: reward:risk is {reward / risk:.2f}, below 1 -- the target is closer than the stop.")
+    end = _parse_day(facts.get("window_end"))
+    start = _parse_day(facts["indicators"].get("last_date"))
+    for ev in report.get("events") or []:
+        d = _parse_day(ev.get("date"))
+        ev["inside_window"] = bool(d and start and end and start < d <= end)
+        if ev["inside_window"]:
+            checks.append(f"{ev.get('event')} on {ev.get('date')} falls inside the {facts['trade_days']}-day window "
+                          f"(to {facts['window_end']}): a gap through the invalidation level is possible.")
+    report["checks"] = checks
+    return report
+
+
 REQUIRED = {
     "business": ("summary", "opportunities", "risks", "questions"),
     "financial": ("periods", "metrics", "analysis", "sources"),
@@ -647,6 +757,7 @@ REQUIRED = {
     "thesis": ("objections", "fragile_assumptions", "blind_spot"),
     # An empty timeline is a legitimate answer for a quiet period.
     "news": ("summary",),
+    "swing": ("historical_read", "setups"),
 }
 
 
@@ -683,6 +794,8 @@ def _get_cached(symbol, horizon):
         days = THESIS_CACHE_DAYS
     elif horizon.startswith(NEWS_PREFIX):
         days = NEWS_CACHE_DAYS
+    elif horizon.startswith(SWING_PREFIX):
+        days = SWING_CACHE_DAYS
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     with _conn() as conn:
         with conn.cursor() as cur:
@@ -760,6 +873,10 @@ def _validate(report, kind):
         if len(obj) < 5:
             raise ValueError("report needs 5 objections")
         report["objections"] = sorted(obj, key=lambda x: x.get("rank") or 99)[:5]
+    elif kind == "swing":
+        report["setups"] = [x for x in report["setups"] if isinstance(x, dict)][:2]
+        if not report["setups"]:
+            raise ValueError("report has no setups")
     elif kind == "news":
         if not isinstance(report.get("timeline", []), list):
             raise ValueError("timeline is not a list")
@@ -773,7 +890,7 @@ def _validate(report, kind):
     return report
 
 
-def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None):
+def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None, facts=None):
     who = f"{symbol} ({company_name})" if company_name else symbol
     today = f"Today is {datetime.now(timezone.utc).date().isoformat()}. "
     if kind == "financial":
@@ -797,6 +914,10 @@ def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None):
         prompt = today + _thesis_prompt(who, thesis)
         # Company filings + competitor filings + industry data, 5 objections.
         max_uses = 14
+    elif kind == "swing":
+        prompt = today + _swing_prompt(who, facts)
+        # Only the event calendar needs the web; the numbers are given.
+        max_uses = 5
     elif kind == "news":
         prompt = today + _news_prompt(who, horizon)
         # IR page + EDGAR + several press searches + catalyst calendar.
@@ -833,15 +954,17 @@ def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None):
             report["thesis"] = thesis   # the page shows exactly what was challenged
         if kind == "news":
             report = _check_news(report, horizon)
+        if kind == "swing":
+            report = _check_swing(report, facts)
         return _check_value(report, quote) if kind == "value" else report
 
     raise RuntimeError("still paused after 4 continuations")
 
 
-def _run_job(symbol, kind, horizon, company_name, quote=None, thesis=None):
+def _run_job(symbol, kind, horizon, company_name, quote=None, thesis=None, facts=None):
     key = (symbol, cache_key(kind, horizon))
     try:
-        report = _generate(symbol, kind, horizon, company_name, quote, thesis)
+        report = _generate(symbol, kind, horizon, company_name, quote, thesis, facts)
         _save(symbol, key[1], report)
         with _jobs_lock:
             _jobs.pop(key, None)
@@ -865,7 +988,7 @@ def get_status(symbol, kind, horizon):
     return {"status": state or "none"}
 
 
-def start(symbol, kind, horizon, company_name=None, quote=None, thesis=None):
+def start(symbol, kind, horizon, company_name=None, quote=None, thesis=None, facts=None):
     """Returns the cached report if one is fresh, otherwise starts a background
     job (unless one is already running or today's cap is used up)."""
     if not _client or not DATABASE_URL:
@@ -887,10 +1010,10 @@ def start(symbol, kind, horizon, company_name=None, quote=None, thesis=None):
             return {"status": "capped"}
         _jobs[key] = "pending"
 
-    if (kind == "value" and not quote) or (kind == "thesis" and not thesis):
+    if (kind == "value" and not quote) or (kind == "thesis" and not thesis) or (kind == "swing" and not facts):
         with _jobs_lock:
             _jobs.pop(key, None)
         return {"status": "no_price" if kind == "value" else "none"}
-    threading.Thread(target=_run_job, args=(symbol, kind, horizon, company_name, quote, thesis),
+    threading.Thread(target=_run_job, args=(symbol, kind, horizon, company_name, quote, thesis, facts),
                      daemon=True).start()
     return {"status": "pending"}
