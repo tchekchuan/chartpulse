@@ -234,6 +234,9 @@
     .track-outcome{font-size:.72rem;font-weight:700;border:1px solid;border-radius:4px;padding:2px 7px;white-space:nowrap}
 
     /* Equity Research modal */
+    #researchBtn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 11px;font-size:.85rem;cursor:pointer}
+    #researchBtn:hover{border-color:#a78bfa;color:#a78bfa}
+    #researchPanel.flash{border-color:#a78bfa;box-shadow:0 0 0 2px #a78bfa55;transition:box-shadow .3s}
     #researchType,#researchHorizon{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:5px 8px;font-size:.8rem}
     #researchOpenBtn{background:#1f6feb;border:none;border-radius:6px;color:#fff;padding:6px 12px;font-size:.8rem;font-weight:600;cursor:pointer}
     #researchOpenBtn:hover{background:#388bfd}
@@ -397,6 +400,7 @@
     <button id="screenerBtn">🔍 Screener</button>
     <button id="arkBtn">🐋 ARK Trades</button>
     <button id="trackBtn">📈 Track Record</button>
+    <button id="researchBtn" title="AI research reports for the loaded symbol — Business &amp; risks, Financial strength (log in required)">🔬 Research</button>
     <button id="myPortfolioBtn" title="Your own portfolio and watchlist — log in with your subscriber email">👤 My Portfolio &amp; Watchlist</button>
     <button id="subscribeBtn">🔔 Subscribe</button>
   </div>
@@ -2002,6 +2006,18 @@ document.getElementById('researchType').addEventListener('change', e => {
   document.getElementById('researchHorizon').style.display = e.target.value === 'financial' ? 'none' : '';
 });
 document.getElementById('researchOpenBtn').addEventListener('click', openResearch);
+
+// Top-bar entry point. The report controls live in the sidebar panel
+// (they apply to the loaded symbol), so this sends logged-out visitors
+// to the login box and everyone else straight to that panel.
+document.getElementById('researchBtn').addEventListener('click', () => {
+  if (!_currentUserEmail) { openMyPortfolio(); return; }
+  const panel = document.getElementById('researchPanel');
+  panel.style.display = '';
+  panel.scrollIntoView({behavior: 'smooth', block: 'center'});
+  panel.classList.add('flash');
+  setTimeout(() => panel.classList.remove('flash'), 1600);
+});
 document.getElementById('researchClose').addEventListener('click', closeResearch);
 document.getElementById('researchOverlay').addEventListener('click', e => {
   if (e.target.id === 'researchOverlay') closeResearch();
