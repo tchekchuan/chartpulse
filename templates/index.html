@@ -1438,7 +1438,14 @@ function updatePriceBar(meta, stage) {
   document.getElementById('pATR').textContent   = `ATR: ${meta.atr.toFixed(2)}`;
 
   const asOf = document.getElementById('pAsOf');
-  if (meta.session_date) {
+  const dayLabel = s => { const [y, mo, da] = s.split('-').map(Number);
+    return new Date(y, mo - 1, da).toLocaleDateString(undefined, {month: 'short', day: 'numeric'}); };
+  if (meta.live_yahoo) {
+    // Yahoo live price, newer than the last daily close: the change is shown
+    // against that dated close.
+    asOf.textContent = `Live trading price (Yahoo) — delayed, not real-time` +
+      (meta.prev_session ? ` · change vs the ${dayLabel(meta.prev_session)} close` : '');
+  } else if (meta.session_date) {
     // Daily data, no live quote: a date only (a bar's timestamp is the start of
     // its trading day, so a clock time would be misleading).
     const [y, mo, da] = meta.session_date.split('-').map(Number);

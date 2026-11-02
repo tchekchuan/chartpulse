@@ -730,6 +730,67 @@ def _fetch_finnhub_quote(sym):
     }
 
 
+def _yahoo_quote(ticker, df, interval):
+    """Price / previous close / session date from Yahoo, internally consistent.
+
+    Why this exists: during e.g. Hong Kong trading hours Yahoo's daily
+    history can lag (today's bar not added yet) while fast_info.last_price
+    is already today's live price -- and fast_info.previous_close then
+    returns the close from TWO sessions ago (seen 2026-11-02, 1810.HK:
+    prev 25.68 = Oct 29 close instead of 26.48 = Oct 30), which made the
+    day's change +4.75% instead of +1.59%. So previous close always comes
+    from dated DAILY bars, never from fast_info.previous_close.
+
+    Returns {"price", "prev_close", "session_date" (YYYY-MM-DD, exchange
+    local), "live" (True = fast_info price from a session newer than or
+    equal to the last daily bar, delayed), "currency"}. Raises nothing.
+    """
+    daily = df
+    if interval != "1d":
+        try:
+            daily = ticker.history(period="10d", interval="1d", auto_adjust=True, repair=False)
+            daily = daily.dropna(subset=["Close"]).reset_index() if daily is not None and not daily.empty else None
+        except Exception:
+            daily = None
+        if daily is None or daily.empty:
+            daily = df   # last resort: the chart's own bars (still dated, still consistent)
+    col  = _dt_col(daily)
+    last = pd.Timestamp(daily[col].iloc[-1])
+    bar_date   = last.date()
+    last_close = round(float(daily["Close"].iloc[-1]), 4)
+    # Previous session = last bar dated before the last bar's date (works for
+    # daily bars and, in the last-resort case, for intraday bars too).
+    dates = [pd.Timestamp(x).date() for x in daily[col]]
+    earlier = [i for i, d in enumerate(dates) if d < bar_date]
+    prev_bar = round(float(daily["Close"].iloc[earlier[-1]]), 4) if earlier else None
+
+    prev_date = str(dates[earlier[-1]]) if earlier else None
+    out = {"price": last_close, "prev_close": prev_bar, "session_date": str(bar_date),
+           "live": False, "prev_session": prev_date, "currency": "USD"}
+    try:
+        fi = ticker.fast_info
+        out["currency"] = getattr(fi, "currency", None) or "USD"
+        lp = float(fi.last_price)
+    except Exception:
+        return out
+    if not lp or np.isnan(lp) or lp <= 0:
+        return out
+    if abs(lp / last_close - 1) < 0.0005:
+        return out   # same as the last bar: keep the dated bar (weekend, holiday, pre-open)
+    today = pd.Timestamp.now(tz=last.tz).date() if last.tz is not None else None
+    if today is None:
+        return out
+    # A live price: the exact session date isn't known for sure (Yahoo's daily
+    # bars can lag a day), so session_date is cleared and the page names the
+    # session the previous close belongs to instead -- that one is dated.
+    if bar_date == today:          # today's (partial) bar exists; live price is within it
+        out.update(price=round(lp, 4), live=True, session_date=None)
+    elif bar_date < today:         # newest session not in the daily bars yet
+        out.update(price=round(lp, 4), prev_close=last_close, live=True,
+                   session_date=None, prev_session=str(bar_date))
+    return out
+
+
 def get_fundamentals(ticker_obj):
     """
     Extracts key Buffett-style fundamental metrics.
@@ -1660,22 +1721,16 @@ def get_stock():
             except Exception as e:
                 app.logger.warning(f"get_stock: Finnhub quote failed for {symbol}: {type(e).__name__}: {e}")
 
+        live_yahoo = False
+        prev_session = None
         if price is None:
-            try:
-                info = ticker.fast_info
-                lp = info.last_price
-                pc = info.previous_close
-                price      = round(float(lp), 4) if lp and not np.isnan(float(lp)) else last_close
-                prev_close = round(float(pc), 4) if pc and not np.isnan(float(pc)) else last_prev_close
-                currency   = getattr(info, "currency", "USD") or "USD"
-            except Exception:
-                price, prev_close, currency = last_close, last_prev_close, "USD"
+            # Yahoo path (non-US symbols, or Finnhub unavailable). A daily
+            # bar's timestamp is the START of its trading day, so the page is
+            # sent a session date (no clock time) -- see _yahoo_quote.
+            yq = _yahoo_quote(ticker, df, interval)
+            price, prev_close, currency = yq["price"], yq["prev_close"] or last_prev_close, yq["currency"]
+            session_date, live_yahoo, prev_session = yq["session_date"], yq["live"], yq["prev_session"]
             priced_at = last_bar_ts
-            # A daily bar's timestamp is the START of its trading day
-            # (exchange midnight), not when the price was set -- shown as a
-            # clock time it read "12:00 AM" for a 4pm close. Send the
-            # exchange-local session date so the page shows a date only.
-            session_date = str(pd.Timestamp(df[_dt_col(df)].iloc[-1]).date())
         else:
             session_date = None
 
@@ -1690,6 +1745,10 @@ def get_stock():
             "priced_at":  priced_at,
             # Set only when the price comes from daily data (no live quote).
             "session_date": session_date,
+            # Yahoo live (delayed) price newer than the last daily close;
+            # prev_session = the dated session prev_close belongs to.
+            "live_yahoo":   live_yahoo,
+            "prev_session": prev_session,
         }
 
         try:
@@ -1821,17 +1880,14 @@ def _analyze_symbol_uncached(sym, period, interval):
         sigs     = trade_signals(df, pp, fractals, vp, mas, rounds, pers, mom, stg)
 
         # ── Price meta — fall back to df if fast_info is unreliable ────────
+        # Same source logic as the chart (see _yahoo_quote): previous close
+        # from dated daily bars, never fast_info.previous_close.
         last_close = round(float(df["Close"].iloc[-1]), 4)
-        prev_close = round(float(df["Close"].iloc[-2]), 4) if len(df) >= 2 else last_close
         try:
-            fi = ticker.fast_info
-            lp = fi.last_price
-            pc = fi.previous_close
-            price    = round(float(lp), 4) if lp and not np.isnan(float(lp)) else last_close
-            prev     = round(float(pc), 4) if pc and not np.isnan(float(pc)) else prev_close
-            currency = getattr(fi, "currency", "USD") or "USD"
+            yq = _yahoo_quote(ticker, df, interval)
+            price, prev, currency = yq["price"], yq["prev_close"], yq["currency"]
         except Exception:
-            price, prev, currency = last_close, prev_close, "USD"
+            price, prev, currency = last_close, (round(float(df["Close"].iloc[-2]), 4) if len(df) >= 2 else last_close), "USD"
 
         chg_pct = round((price - prev) / prev * 100, 2) if prev else 0
         meta    = {"symbol": sym, "price": price, "prev_close": prev,
