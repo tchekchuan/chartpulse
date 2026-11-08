@@ -425,7 +425,7 @@
     <span class="get">get</span><span class="brand"><span class="chart">Chart</span><span class="pulse">Pulse</span></span>
   </h1>
   <div class="search-wrap">
-    <input id="symbolInput" type="text" placeholder="Symbol (e.g. AAPL)" value="AAPL" autocomplete="off"/>
+    <input id="symbolInput" type="text" placeholder="Symbol (e.g. AAPL)" value="" autocomplete="off"/>
     <div id="suggestions"></div>
   </div>
   <div class="controls">
@@ -3369,10 +3369,11 @@ checkLoginState().then(() => {
     history.replaceState(null, '', location.pathname);  // clean up the URL
     openMyPortfolio();
   }
-  // AI Analyst panel's visibility depends on _currentUserEmail, so the
-  // very first loadStock() must wait for this to resolve -- otherwise a
-  // logged-in visitor's first symbol load would render with the panel
-  // incorrectly hidden (fixed on their next search, but wrong on load).
+  // No stock is auto-loaded on page open (changed 2026-11-09 at Shawn's
+  // request): a logged-in auto-load of AAPL triggered a paid AI Analyst call
+  // every day. The page waits for the visitor to enter a symbol; loadStock()
+  // itself returns early on an empty symbol, so this is a no-op unless the
+  // browser restored a typed value into the box.
   loadStock();
 });
 
