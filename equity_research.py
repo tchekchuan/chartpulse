@@ -1036,18 +1036,47 @@ def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None, fact
     messages = [{"role": "user", "content": prompt}]
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_uses}]
 
+    # Prompt caching (added 2026-11-09): top-level automatic caching. With it
+    # on, the web-search server tool also writes a cache entry after each
+    # search's results, so the 5-20 internal steps of one report re-read the
+    # accumulated search results at the cache-read price instead of full
+    # input price; pause_turn continuations read the same cache. Changes cost
+    # only, not the prompt or the output. If the API ever rejects the field,
+    # the report falls back to running uncached rather than failing.
+    use_cache = True
+    totals = {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0}
+
     # A long server-tool turn can come back as pause_turn; resending the
     # partial assistant turn lets the server continue where it stopped.
     for _ in range(4):
-        with _client.messages.stream(
+        kwargs = dict(
             model="claude-opus-5-5",
             max_tokens=32000,
             output_config={"effort": "high"},
             system=SYSTEM_PROMPT,
             tools=tools,
             messages=messages,
-        ) as stream:
-            response = stream.get_final_message()
+        )
+        if use_cache:
+            kwargs["cache_control"] = {"type": "ephemeral"}
+        try:
+            with _client.messages.stream(**kwargs) as stream:
+                response = stream.get_final_message()
+        except anthropic.BadRequestError as e:
+            if not use_cache or "cache" not in str(e).lower():
+                raise
+            print(f"equity_research: caching rejected, retrying uncached: {e}")
+            use_cache = False
+            kwargs.pop("cache_control")
+            with _client.messages.stream(**kwargs) as stream:
+                response = stream.get_final_message()
+
+        u = response.usage
+        totals["input"]       += getattr(u, "input_tokens", 0) or 0
+        totals["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+        totals["cache_read"]  += getattr(u, "cache_read_input_tokens", 0) or 0
+        totals["output"]      += getattr(u, "output_tokens", 0) or 0
+        print(f"equity_research: usage {symbol}/{kind} so far {totals} stop={response.stop_reason}")
 
         if response.stop_reason == "refusal":
             category = getattr(response.stop_details, "category", None)
