@@ -126,6 +126,8 @@ DAILY_CAP = int(os.environ.get("EQUITY_RESEARCH_DAILY_CAP", "5"))
 # Fundamentals move quarterly, not daily -- a week-old report is still
 # current, and this keeps repeat views of popular symbols free.
 CACHE_DAYS = int(os.environ.get("EQUITY_RESEARCH_CACHE_DAYS", "7"))
+RESEARCH_MODEL = os.environ.get("EQUITY_RESEARCH_MODEL", "claude-opus-5-5")
+NEWS_MODEL = os.environ.get("EQUITY_RESEARCH_NEWS_MODEL", "claude-sonnet-5-5")
 
 HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
 # All report types share one pipeline and one cache table. The table's
@@ -1049,12 +1051,16 @@ def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None, fact
     # the report falls back to running uncached rather than failing.
     use_cache = True
     totals = {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0}
+    # News is finding/sorting/labelling sourced articles, not deep financial
+    # reasoning, so it runs on Sonnet 5.5 (half Opus's price) -- switched
+    # 2026-11-09 at Shawn's request. Every other report stays on Opus 5.5.
+    model = NEWS_MODEL if kind == "news" else RESEARCH_MODEL
 
     # A long server-tool turn can come back as pause_turn; resending the
     # partial assistant turn lets the server continue where it stopped.
     for _ in range(4):
         kwargs = dict(
-            model="claude-opus-5-5",
+            model=model,
             max_tokens=32000,
             output_config={"effort": "high"},
             system=SYSTEM_PROMPT,
@@ -1080,7 +1086,7 @@ def _generate(symbol, kind, horizon, company_name, quote=None, thesis=None, fact
         totals["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
         totals["cache_read"]  += getattr(u, "cache_read_input_tokens", 0) or 0
         totals["output"]      += getattr(u, "output_tokens", 0) or 0
-        print(f"equity_research: usage {symbol}/{kind} so far {totals} stop={response.stop_reason}")
+        print(f"equity_research: usage {symbol}/{kind} [{model}] so far {totals} stop={response.stop_reason}")
 
         if response.stop_reason == "refusal":
             category = getattr(response.stop_details, "category", None)
