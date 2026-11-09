@@ -2133,11 +2133,10 @@ document.getElementById('researchBtn').addEventListener('click', () => {
 
     <div class="rp-sec"><div class="rp-sec-h">3 · Test your own idea</div>
       <div class="rp-card">
-        <p>Write what you believe about ${S} and why. Then either have it attacked by a skeptic, or turned into 5 indicators to track.</p>
+        <p>Write what you believe about ${S} and why, and turn it into 5 indicators to track.</p>
         <textarea id="rpThesis" class="rp-in" rows="3" maxlength="2000" placeholder="e.g. AI data-centre demand doubles revenue by 2028 and margins turn positive"
           style="width:100%;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>
         <div class="rp-row">
-          <button class="rp-go" id="rpChallenge" style="flex:1">Challenge it — 5 strongest objections</button>
           <button class="rp-go" id="rpMonitor" style="flex:1">Monitor it — 5 indicators + checklist</button>
         </div>
       </div>
@@ -2164,7 +2163,6 @@ document.getElementById('researchBtn').addEventListener('click', () => {
   on('rpNews', () => openResearch('news', '3y', {start: val('rpNewsFrom'), end: val('rpNewsTo')}));
   on('rpVal', () => openResearch('value', val('rpValH')));
   on('rpCmp', () => openResearch('compare', '3y', val('rpPeers')));
-  on('rpChallenge', () => openResearch('thesis', '3y', val('rpThesis')));
   on('rpMonitor', () => openResearch('monitor', '3y', val('rpThesis')));
   on('rpSwing', () => openResearch('swing', '3y', {days: val('rpDays'), file: document.getElementById('rpFile').files[0]}));
   on('rpCalc', () => openPositionCalc());

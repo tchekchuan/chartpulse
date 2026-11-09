@@ -132,7 +132,11 @@ HORIZONS = {"1y": "1-year", "3y": "3-year", "5y": "5-year"}
 # `horizon` column is the cache key: "1y"/"3y"/"5y" for a business report,
 # FIN_KEY / EARN_KEY for the financial-strength and earnings reports
 # (neither has a horizon).
-REPORT_TYPES = ("business", "financial", "earnings", "compare", "value", "thesis", "news", "swing", "monitor")
+# "thesis" (Thesis Challenge) was removed from the site on 2026-11-09 at
+# Shawn's request: no button, and the API rejects it so it can't be run
+# (or billed) directly. Its prompt/checker code below is left in place;
+# add "thesis" back to this tuple and the button to restore it.
+REPORT_TYPES = ("business", "financial", "earnings", "compare", "value", "news", "swing", "monitor")
 # Report types whose input is the user's free-text thesis.
 THESIS_REPORTS = ("thesis", "monitor")
 FIN_KEY = "fin"
